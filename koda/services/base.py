@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from loguru import logger
+
 from koda.messaging.events import InboundMessage, OutboundMessage
 from koda.messaging.queue import MessageBus
 
@@ -102,7 +104,10 @@ class BaseChannel(ABC):
             metadata: Optional channel-specific metadata.
         """
         if not self.is_allowed(sender_id):
+            logger.warning(f"🚫 Message from {sender_id} blocked - not in allow list")
             return
+        
+        logger.debug(f"📨 Publishing message to bus from {self.name}:{sender_id}")
         
         msg = InboundMessage(
             channel=self.name,
@@ -114,6 +119,7 @@ class BaseChannel(ABC):
         )
         
         await self.bus.publish_inbound(msg)
+        logger.debug(f"✅ Message published to bus")
     
     @property
     def is_running(self) -> bool:

@@ -201,7 +201,7 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
+        logger.info(f"🤖 Processing message from {msg.channel}:{msg.sender_id}: {msg.content[:80]}{'...' if len(msg.content) > 80 else ''}")
         
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
@@ -226,6 +226,8 @@ class AgentLoop:
         iteration = 0
         final_content = None
         
+        logger.info(f"🧠 Calling LLM ({self.model})...")
+        
         while iteration < self.max_iterations:
             iteration += 1
             
@@ -238,6 +240,7 @@ class AgentLoop:
             
             # Handle tool calls
             if response.has_tool_calls:
+                logger.info(f"🔧 LLM requested {len(response.tool_calls)} tool(s): {', '.join(tc.name for tc in response.tool_calls)}")
                 # Add assistant message with tool calls
                 tool_call_dicts = [
                     {
@@ -265,6 +268,7 @@ class AgentLoop:
             else:
                 # No tool calls, we're done
                 final_content = response.content
+                logger.info(f"💬 LLM response ready ({len(final_content)} chars)")
                 break
         
         if final_content is None:
@@ -274,6 +278,8 @@ class AgentLoop:
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
+        
+        logger.info(f"📤 Sending response to {msg.channel}:{msg.chat_id[:20]}...")
         
         return OutboundMessage(
             channel=msg.channel,

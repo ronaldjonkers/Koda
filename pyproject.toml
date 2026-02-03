@@ -29,6 +29,8 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    # QR code display for WhatsApp
+    "qrcode>=7.4.0",
     # Google integrations (Calendar, Gmail)
     "google-api-python-client>=2.100.0",
     "google-auth-httplib2>=0.1.0",

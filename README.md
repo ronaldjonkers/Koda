@@ -472,19 +472,45 @@ koda agent -m "Send an email to john@example.com about the meeting"
 
 ### WhatsApp
 
+#### Quick Start
+
 ```bash
-# Configure WhatsApp
+# 1. Configure WhatsApp (choose Bot Mode or Restricted Mode)
 koda config whatsapp
 
-# Link your WhatsApp (first time only - scan QR code)
-koda channels login
-
-# Start the gateway (WhatsApp bridge starts automatically)
+# 2. Start the gateway - bridge starts automatically
 koda gateway
+
+# 3. First time: scan QR code shown in terminal with WhatsApp
+#    Open WhatsApp > Settings > Linked Devices > Link a Device
 ```
 
-> **Note:** The gateway automatically starts the WhatsApp bridge. No need to run it separately!
-> Use `--no-bridge` to disable auto-start: `koda gateway --no-bridge`
+#### How It Works
+
+1. **Gateway starts** → WhatsApp bridge starts automatically
+2. **QR code appears** in terminal (first time or when session expires)
+3. **Scan with phone** → WhatsApp linked
+4. **Messages flow**: WhatsApp → Bridge → Koda → LLM → Response
+
+#### Logging & Debugging
+
+When messages arrive, you'll see detailed logs:
+```
+📥 WhatsApp message from +31612345678: Hello, can you help me?
+🤖 Processing message from whatsapp:31612345678: Hello, can you...
+🧠 Calling LLM (anthropic/claude-sonnet-4-20250514)...
+💬 LLM response ready (156 chars)
+📤 Sending response to whatsapp:31612345678@s.whatsapp.net...
+```
+
+Use `--verbose` for even more detail: `koda gateway --verbose`
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Show debug-level logs |
+| `--no-bridge` | Don't auto-start WhatsApp bridge |
 
 **Bot Mode** - Give the assistant its own WhatsApp number to respond to everyone:
 

@@ -727,9 +727,27 @@ class SetupWizard:
                 self.config.channels.whatsapp.allow_from = [
                     x.strip() for x in allow_from.split(",") if x.strip()
                 ]
+            
+            # Owner settings (also useful in restricted mode)
+            console.print("\n[bold]Owner Settings[/bold]")
+            console.print("[dim]Optional: Set your phone and name for escalations and greetings.[/dim]")
+            
+            owner_phone = Prompt.ask(
+                "Your phone number (optional, for escalations)",
+                default=self.config.channels.whatsapp.owner_phone
+            )
+            self.config.channels.whatsapp.owner_phone = owner_phone
+            
+            if owner_phone:
+                owner_name = Prompt.ask(
+                    "Your name",
+                    default=self.config.channels.whatsapp.owner_name or self.config.assistant.user_name
+                )
+                self.config.channels.whatsapp.owner_name = owner_name
         
         console.print("\n[green]✓[/green] WhatsApp configured")
-        console.print("[yellow]![/yellow] Run 'koda channels login' to complete WhatsApp setup")
+        console.print("[yellow]![/yellow] Start the gateway with 'koda gateway' - WhatsApp bridge starts automatically")
+        console.print("[dim]   First time: scan QR code shown in terminal to link WhatsApp[/dim]")
     
     def _setup_whatsapp_contact_rules(self) -> None:
         """Add custom rules for specific WhatsApp contacts."""

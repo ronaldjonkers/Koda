@@ -230,9 +230,12 @@ class WhatsAppChannel(BaseChannel):
             # Extract just the phone number as chat_id
             phone = sender.split("@")[0] if "@" in sender else sender
             
+            # Log incoming message
+            logger.info(f"📥 WhatsApp message from +{phone}: {content[:100]}{'...' if len(content) > 100 else ''}")
+            
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info(f"Voice message received from {phone}")
+                logger.info(f"🎤 Voice message received from +{phone}")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
             # Get contact rule for custom handling
@@ -256,12 +259,14 @@ class WhatsAppChannel(BaseChannel):
             # If this is a new contact in bot mode, we might want to send a greeting
             # (This would be handled by the agent based on conversation history)
             
+            logger.debug(f"📤 Forwarding message to agent for processing...")
             await self._handle_message(
                 sender_id=phone,
                 chat_id=sender,  # Use full JID for replies
                 content=content,
                 metadata=metadata
             )
+            logger.debug(f"✅ Message forwarded to agent")
         
         elif msg_type == "status":
             # Connection status update
@@ -274,8 +279,23 @@ class WhatsAppChannel(BaseChannel):
                 self._connected = False
         
         elif msg_type == "qr":
-            # QR code for authentication
-            logger.info("Scan QR code in the bridge terminal to connect WhatsApp")
+            # QR code for authentication - display it in console
+            qr_data = data.get("qr", "")
+            logger.info("\n" + "="*50)
+            logger.info("📱 WHATSAPP QR CODE - Scan with your phone")
+            logger.info("="*50)
+            if qr_data:
+                try:
+                    import qrcode
+                    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+                    qr.add_data(qr_data)
+                    qr.make(fit=True)
+                    # Print QR code to terminal
+                    qr.print_ascii(invert=True)
+                except ImportError:
+                    logger.info(f"QR Data: {qr_data}")
+                    logger.info("Install 'qrcode' package to display QR in terminal: pip install qrcode")
+            logger.info("="*50 + "\n")
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")
