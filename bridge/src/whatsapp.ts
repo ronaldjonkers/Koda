@@ -106,23 +106,49 @@ export class WhatsAppClient {
 
     // Handle incoming messages
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      if (type !== 'notify') return;
+      console.log(`📨 messages.upsert event: type=${type}, count=${messages.length}`);
+      
+      if (type !== 'notify') {
+        console.log(`   Skipping: type is '${type}', not 'notify'`);
+        return;
+      }
 
       for (const msg of messages) {
-        // Skip own messages
-        if (msg.key.fromMe) continue;
-
+        const sender = msg.key.remoteJid || 'unknown';
+        const fromMe = msg.key.fromMe || false;
+        
+        console.log(`   Message from: ${sender}, fromMe: ${fromMe}`);
+        
         // Skip status updates
-        if (msg.key.remoteJid === 'status@broadcast') continue;
+        if (msg.key.remoteJid === 'status@broadcast') {
+          console.log(`   Skipping: status broadcast`);
+          continue;
+        }
 
         const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        if (!content) {
+          console.log(`   Skipping: no extractable content`);
+          continue;
+        }
+        
+        console.log(`   Content: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
+        // For self-messages (notes to self), use participant or remoteJid
+        // This allows testing by sending messages to "Saved Messages" or yourself
+        let messageSender = sender;
+        if (fromMe && !isGroup) {
+          // This is a message we sent - could be to ourselves for testing
+          // We still forward it so users can test the bot
+          console.log(`   Note: This is a self-sent message, forwarding for processing`);
+        }
+
+        console.log(`✅ Forwarding message to Python: ${sender}`);
+        
         this.options.onMessage({
           id: msg.key.id || '',
-          sender: msg.key.remoteJid || '',
+          sender: messageSender,
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,

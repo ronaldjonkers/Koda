@@ -57,7 +57,7 @@ class WhatsAppChannel(BaseChannel):
         
         bridge_url = self.config.bridge_url
         
-        logger.info(f"Connecting to WhatsApp bridge at {bridge_url}...")
+        logger.info(f"🔌 Connecting to WhatsApp bridge at {bridge_url}...")
         
         self._running = True
         
@@ -66,14 +66,15 @@ class WhatsAppChannel(BaseChannel):
                 async with websockets.connect(bridge_url) as ws:
                     self._ws = ws
                     self._connected = True
-                    logger.info("Connected to WhatsApp bridge")
+                    logger.info("✅ Connected to WhatsApp bridge - listening for messages...")
                     
                     # Listen for messages
                     async for message in ws:
                         try:
+                            logger.debug(f"📩 Raw bridge message: {message[:200]}...")
                             await self._handle_bridge_message(message)
                         except Exception as e:
-                            logger.error(f"Error handling bridge message: {e}")
+                            logger.error(f"Error handling bridge message: {e}", exc_info=True)
                     
             except asyncio.CancelledError:
                 break
@@ -98,7 +99,7 @@ class WhatsAppChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
-            logger.warning("WhatsApp bridge not connected")
+            logger.warning("⚠️ WhatsApp bridge not connected - cannot send message")
             return
         
         try:
@@ -107,9 +108,11 @@ class WhatsAppChannel(BaseChannel):
                 "to": msg.chat_id,
                 "text": msg.content
             }
+            logger.info(f"📤 Sending WhatsApp message to {msg.chat_id[:20]}... ({len(msg.content)} chars)")
             await self._ws.send(json.dumps(payload))
+            logger.info(f"✅ WhatsApp message sent successfully")
         except Exception as e:
-            logger.error(f"Error sending WhatsApp message: {e}")
+            logger.error(f"❌ Error sending WhatsApp message: {e}")
     
     def _load_contact_rules(self) -> None:
         """Load contact rules into a lookup dict."""

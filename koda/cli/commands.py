@@ -516,9 +516,17 @@ def gateway(
     from koda.services.reminder import ReminderService, EmailSender
     from koda.services.webhook_api import WebhookServer
     
+    import sys
+    from loguru import logger
+    
+    # Configure logging - always show INFO, DEBUG with --verbose
+    logger.remove()  # Remove default handler
     if verbose:
+        logger.add(sys.stderr, level="DEBUG", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
         import logging
         logging.basicConfig(level=logging.DEBUG)
+    else:
+        logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
     
     console.print(f"{__logo__} Starting koda gateway on port {port}...")
     
@@ -536,11 +544,12 @@ def gateway(
         if bridge_dir.exists() and (bridge_dir / "dist" / "index.js").exists():
             console.print("[dim]Starting WhatsApp bridge...[/dim]")
             try:
+                # Always show bridge output for debugging
                 bridge_process = subprocess.Popen(
                     ["node", "dist/index.js"],
                     cwd=str(bridge_dir),
-                    stdout=subprocess.PIPE if not verbose else None,
-                    stderr=subprocess.PIPE if not verbose else None,
+                    stdout=None,  # Inherit stdout to show bridge logs
+                    stderr=None,  # Inherit stderr to show bridge errors
                 )
                 # Give the bridge a moment to start
                 import time
