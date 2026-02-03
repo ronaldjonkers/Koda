@@ -72,15 +72,33 @@ class BaseChannel(ABC):
         
         # If no allow list, allow everyone
         if not allow_list:
+            logger.debug(f"✅ No allow_from list - allowing {sender_id}")
             return True
         
         sender_str = str(sender_id)
-        if sender_str in allow_list:
-            return True
+        
+        # Normalize phone numbers for comparison (remove +, spaces, dashes)
+        def normalize_phone(phone: str) -> str:
+            return phone.replace("+", "").replace(" ", "").replace("-", "")
+        
+        sender_normalized = normalize_phone(sender_str)
+        
+        for allowed in allow_list:
+            allowed_normalized = normalize_phone(allowed)
+            if sender_normalized == allowed_normalized:
+                logger.debug(f"✅ {sender_id} matches allow_from: {allowed}")
+                return True
+        
+        # Also check with pipe-separated values (for Telegram)
         if "|" in sender_str:
             for part in sender_str.split("|"):
-                if part and part in allow_list:
-                    return True
+                part_normalized = normalize_phone(part)
+                for allowed in allow_list:
+                    if part_normalized == normalize_phone(allowed):
+                        logger.debug(f"✅ {part} matches allow_from: {allowed}")
+                        return True
+        
+        logger.info(f"🚫 {sender_id} not in allow_from list: {allow_list}")
         return False
     
     async def _handle_message(

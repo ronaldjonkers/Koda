@@ -68,14 +68,23 @@ class SetupWizard:
         if Confirm.ask("Configure now?", default=False):
             self._setup_email()
         
-        # Step 5: Bot's own email
-        console.print("\n[bold yellow]Step 5: Koda's Email Address (Send)[/bold yellow]")
+        # Step 5: iCloud Contacts (macOS only)
+        import platform
+        if platform.system() == "Darwin":
+            console.print("\n[bold yellow]Step 5: iCloud Contacts[/bold yellow]")
+            console.print("[dim]Sync your iCloud contacts so Koda can look up phone numbers,[/dim]")
+            console.print("[dim]send birthday wishes, and address people by name.[/dim]")
+            if Confirm.ask("Configure now?", default=False):
+                self._setup_icloud_contacts()
+        
+        # Step 6: Bot's own email
+        console.print("\n[bold yellow]Step 6: Koda's Email Address (Send)[/bold yellow]")
         console.print("[dim]Give Koda its own email address to send messages, reminders, and[/dim]")
         console.print("[dim]notifications. This is separate from your personal email.[/dim]")
         if Confirm.ask("Configure now?", default=False):
             self._setup_bot_email()
         
-        # Step 6: Messaging channels
+        # Step 7: Messaging channels
         console.print("\n[bold yellow]Step 6: Messaging Channels[/bold yellow]")
         console.print("[dim]Connect Telegram or WhatsApp so Koda can respond to messages,[/dim]")
         console.print("[dim]act as a virtual assistant, or run as an autonomous bot.[/dim]")
@@ -244,30 +253,100 @@ class SetupWizard:
         console.print("  \u2022 Help schedule meetings with others\n")
         
         console.print("[bold]Supported Calendar Types:[/bold]")
-        console.print("  [cyan]google[/cyan]   - Google Calendar (requires OAuth setup)")
+        console.print("  [cyan]gmail[/cyan]    - Google Calendar via CalDAV (simple, app password)")
+        console.print("  [cyan]google[/cyan]   - Google Calendar via API (complex, OAuth setup)")
         console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
-        console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, Radicale, or any CalDAV server\n")
+        console.print("  [cyan]icloud[/cyan]   - Apple iCloud Calendar")
+        console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, Radicale, or custom CalDAV\n")
         
         cal_type = Prompt.ask(
             "Select calendar type",
-            choices=["google", "exchange", "caldav", "none"],
+            choices=["gmail", "google", "exchange", "icloud", "caldav", "none"],
             default="none"
         )
         
         if cal_type == "none":
             return
         
-        if cal_type == "google":
+        if cal_type == "gmail":
+            self._setup_gmail_caldav()
+        elif cal_type == "google":
             self._setup_google_calendar()
         elif cal_type == "exchange":
             self._setup_exchange()
+        elif cal_type == "icloud":
+            self._setup_icloud_caldav()
         elif cal_type == "caldav":
             self._setup_caldav()
     
+    def _setup_gmail_caldav(self) -> None:
+        """Configure Gmail Calendar via CalDAV (simpler than OAuth)."""
+        console.print("\n[bold]Gmail Calendar Setup (CalDAV)[/bold]")
+        console.print("[dim]This is the easy way - just use your email and an app password.[/dim]\n")
+        console.print("[bold]Steps to create an App Password:[/bold]")
+        console.print("  1. Go to [cyan]https://myaccount.google.com/apppasswords[/cyan]")
+        console.print("  2. Select 'Mail' and 'Other (Custom name)'")
+        console.print("  3. Enter 'Koda' as the name")
+        console.print("  4. Copy the 16-character password\n")
+        console.print("[yellow]Note:[/yellow] 2-Step Verification must be enabled for App Passwords.\n")
+        
+        email = Prompt.ask("Gmail address")
+        password = Prompt.ask("App password (16 characters, no spaces)", password=True)
+        
+        # Gmail CalDAV URL
+        caldav_url = f"https://apidata.googleusercontent.com/caldav/v2/{email}/events"
+        
+        self.config.integrations.caldav.enabled = True
+        self.config.integrations.caldav.url = caldav_url
+        self.config.integrations.caldav.username = email
+        self.config.integrations.caldav.password = password
+        
+        # Test connection
+        console.print("Testing CalDAV connection...", end=" ")
+        success, message = self._test_caldav(caldav_url, email, password)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            console.print("[dim]Make sure 2-Step Verification is on and you're using an App Password[/dim]")
+    
+    def _setup_icloud_caldav(self) -> None:
+        """Configure iCloud Calendar via CalDAV."""
+        console.print("\n[bold]iCloud Calendar Setup[/bold]")
+        console.print("[dim]Connect to your Apple iCloud Calendar.[/dim]\n")
+        console.print("[bold]Steps to create an App-Specific Password:[/bold]")
+        console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
+        console.print("  2. Sign in and go to 'App-Specific Passwords'")
+        console.print("  3. Click '+' and create a password for 'Koda'")
+        console.print("  4. Copy the generated password\n")
+        
+        email = Prompt.ask("Apple ID email")
+        password = Prompt.ask("App-Specific Password", password=True)
+        
+        # iCloud CalDAV URL
+        caldav_url = "https://caldav.icloud.com"
+        
+        self.config.integrations.caldav.enabled = True
+        self.config.integrations.caldav.url = caldav_url
+        self.config.integrations.caldav.username = email
+        self.config.integrations.caldav.password = password
+        
+        # Test connection
+        console.print("Testing CalDAV connection...", end=" ")
+        success, message = self._test_caldav(caldav_url, email, password)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            console.print("[dim]Make sure you're using an App-Specific Password, not your Apple ID password[/dim]")
+    
     def _setup_google_calendar(self) -> None:
-        """Configure Google Calendar."""
-        console.print("\n[bold]Google Calendar Setup[/bold]")
-        console.print("[dim]Google Calendar requires OAuth 2.0 credentials for secure access.[/dim]\n")
+        """Configure Google Calendar via OAuth (complex)."""
+        console.print("\n[bold]Google Calendar Setup (OAuth API)[/bold]")
+        console.print("[dim]This requires setting up a Google Cloud project.[/dim]")
+        console.print("[yellow]Tip:[/yellow] Consider using 'gmail' option instead - it's much simpler!\n")
         console.print("Follow these steps to get your credentials:")
         console.print("  1. Go to [cyan]https://console.cloud.google.com/[/cyan]")
         console.print("  2. Create a new project (or select existing)")
@@ -436,34 +515,96 @@ class SetupWizard:
         console.print("  • Alert you about important messages\n")
         
         console.print("[bold]Supported Email Types:[/bold]")
-        console.print("  [cyan]google[/cyan]   - Gmail (uses same credentials as Google Calendar)")
+        console.print("  [cyan]gmail[/cyan]    - Gmail via IMAP (simple, app password)")
+        console.print("  [cyan]icloud[/cyan]   - iCloud Mail via IMAP")
         console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
-        console.print("  [cyan]imap[/cyan]     - Any email provider with IMAP support\n")
+        console.print("  [cyan]imap[/cyan]     - Any other email provider with IMAP\n")
         
         email_type = Prompt.ask(
             "Select email type",
-            choices=["google", "exchange", "imap", "none"],
+            choices=["gmail", "icloud", "exchange", "imap", "none"],
             default="none"
         )
         
         if email_type == "none":
             return
         
-        if email_type == "google":
-            console.print("[dim]Gmail uses the same credentials as Google Calendar[/dim]")
-            self.config.integrations.google.enabled = True
+        if email_type == "gmail":
+            self._setup_gmail_imap()
+        elif email_type == "icloud":
+            self._setup_icloud_imap()
         elif email_type == "exchange":
             if not self.config.integrations.exchange.enabled:
                 self._setup_exchange()
         elif email_type == "imap":
             self._setup_imap()
     
+    def _setup_gmail_imap(self) -> None:
+        """Configure Gmail via IMAP (simpler than OAuth)."""
+        console.print("\n[bold]Gmail Setup (IMAP)[/bold]")
+        console.print("[dim]This is the easy way - just use your email and an app password.[/dim]\n")
+        console.print("[bold]Steps to create an App Password:[/bold]")
+        console.print("  1. Go to [cyan]https://myaccount.google.com/apppasswords[/cyan]")
+        console.print("  2. Select 'Mail' and 'Other (Custom name)'")
+        console.print("  3. Enter 'Koda' as the name")
+        console.print("  4. Copy the 16-character password\n")
+        console.print("[yellow]Note:[/yellow] 2-Step Verification must be enabled for App Passwords.\n")
+        
+        email = Prompt.ask("Gmail address")
+        password = Prompt.ask("App password (16 characters, no spaces)", password=True)
+        
+        self.config.integrations.imap.enabled = True
+        self.config.integrations.imap.host = "imap.gmail.com"
+        self.config.integrations.imap.port = 993
+        self.config.integrations.imap.username = email
+        self.config.integrations.imap.password = password
+        self.config.integrations.imap.use_ssl = True
+        
+        # Test connection
+        console.print("Testing IMAP connection...", end=" ")
+        success, message = self._test_imap("imap.gmail.com", 993, email, password, True)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            console.print("[dim]Make sure 2-Step Verification is on and you're using an App Password[/dim]")
+    
+    def _setup_icloud_imap(self) -> None:
+        """Configure iCloud Mail via IMAP."""
+        console.print("\n[bold]iCloud Mail Setup[/bold]")
+        console.print("[dim]Connect to your Apple iCloud Mail.[/dim]\n")
+        console.print("[bold]Steps to create an App-Specific Password:[/bold]")
+        console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
+        console.print("  2. Sign in and go to 'App-Specific Passwords'")
+        console.print("  3. Click '+' and create a password for 'Koda'")
+        console.print("  4. Copy the generated password\n")
+        
+        email = Prompt.ask("Apple ID email")
+        password = Prompt.ask("App-Specific Password", password=True)
+        
+        self.config.integrations.imap.enabled = True
+        self.config.integrations.imap.host = "imap.mail.me.com"
+        self.config.integrations.imap.port = 993
+        self.config.integrations.imap.username = email
+        self.config.integrations.imap.password = password
+        self.config.integrations.imap.use_ssl = True
+        
+        # Test connection
+        console.print("Testing IMAP connection...", end=" ")
+        success, message = self._test_imap("imap.mail.me.com", 993, email, password, True)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            console.print("[dim]Make sure you're using an App-Specific Password, not your Apple ID password[/dim]")
+    
     def _setup_imap(self) -> None:
         """Configure IMAP email."""
         console.print("\n[bold]IMAP Email Setup[/bold]")
         console.print("[dim]IMAP works with almost any email provider.[/dim]\n")
         console.print("Common IMAP servers:")
-        console.print("  [cyan]Gmail:[/cyan]      imap.gmail.com (port 993)")
         console.print("  [cyan]Outlook:[/cyan]    outlook.office365.com (port 993)")
         console.print("  [cyan]Yahoo:[/cyan]      imap.mail.yahoo.com (port 993)")
         console.print("  [cyan]ProtonMail:[/cyan] Use ProtonMail Bridge\n")
@@ -780,6 +921,39 @@ class SetupWizard:
             console.print(f"[green]✓[/green] Added rule for {name or phone}")
         
         self.config.channels.whatsapp.contact_rules = rules
+    
+    def _setup_icloud_contacts(self) -> None:
+        """Configure iCloud contacts integration (macOS only)."""
+        console.print("\n[bold]iCloud Contacts Setup[/bold]")
+        console.print("[dim]Access your iCloud contacts for birthday wishes and name lookup.[/dim]\n")
+        console.print("[bold]How it works:[/bold]")
+        console.print("  • Koda uses your iCloud credentials to sync contacts")
+        console.print("  • Contacts are cached locally for quick access")
+        console.print("  • Birthday wishes can be sent automatically\n")
+        console.print("[bold]Steps:[/bold]")
+        console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
+        console.print("  2. Sign in and go to 'App-Specific Passwords'")
+        console.print("  3. Create a password for 'Koda'\n")
+        
+        email = Prompt.ask("Apple ID email")
+        password = Prompt.ask("App-Specific Password", password=True)
+        
+        self.config.integrations.icloud.enabled = True
+        self.config.integrations.icloud.username = email
+        self.config.integrations.icloud.password = password
+        
+        # Test connection
+        console.print("Testing iCloud connection...", end=" ")
+        try:
+            from pyicloud import PyiCloudService
+            api = PyiCloudService(email, password)
+            if api.requires_2fa:
+                console.print("[yellow]![/yellow] 2FA required - use App-Specific Password instead")
+            else:
+                console.print(f"[green]✓[/green] Connected to iCloud")
+        except Exception as e:
+            console.print(f"[red]✗[/red] {e}")
+            console.print("[dim]Make sure you're using an App-Specific Password[/dim]")
     
     def _setup_webhook(self) -> None:
         """Configure webhook API."""
