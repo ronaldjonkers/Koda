@@ -476,12 +476,15 @@ koda agent -m "Send an email to john@example.com about the meeting"
 # Configure WhatsApp
 koda config whatsapp
 
-# Link your WhatsApp
+# Link your WhatsApp (first time only - scan QR code)
 koda channels login
 
-# Start the gateway
+# Start the gateway (WhatsApp bridge starts automatically)
 koda gateway
 ```
+
+> **Note:** The gateway automatically starts the WhatsApp bridge. No need to run it separately!
+> Use `--no-bridge` to disable auto-start: `koda gateway --no-bridge`
 
 **Bot Mode** - Give the assistant its own WhatsApp number to respond to everyone:
 

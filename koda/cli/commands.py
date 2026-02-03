@@ -499,8 +499,12 @@ server {{
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    no_bridge: bool = typer.Option(False, "--no-bridge", help="Don't auto-start WhatsApp bridge"),
 ):
     """Start the koda gateway."""
+    import subprocess
+    import signal
+    from pathlib import Path
     from koda.config.loader import load_config, get_data_dir
     from koda.messaging.queue import MessageBus
     from koda.providers.litellm_provider import LiteLLMProvider
@@ -518,7 +522,43 @@ def gateway(
     
     console.print(f"{__logo__} Starting koda gateway on port {port}...")
     
+    # Track bridge process for cleanup
+    bridge_process = None
+    
     config = load_config()
+    
+    # Auto-start WhatsApp bridge if enabled
+    if config.channels.whatsapp.enabled and not no_bridge:
+        # Find the bridge directory
+        import sys
+        bridge_dir = Path(__file__).parent.parent.parent / "bridge"
+        
+        if bridge_dir.exists() and (bridge_dir / "dist" / "index.js").exists():
+            console.print("[dim]Starting WhatsApp bridge...[/dim]")
+            try:
+                bridge_process = subprocess.Popen(
+                    ["node", "dist/index.js"],
+                    cwd=str(bridge_dir),
+                    stdout=subprocess.PIPE if not verbose else None,
+                    stderr=subprocess.PIPE if not verbose else None,
+                )
+                # Give the bridge a moment to start
+                import time
+                time.sleep(2)
+                
+                if bridge_process.poll() is None:
+                    console.print("[green]✓[/green] WhatsApp bridge started")
+                else:
+                    console.print("[yellow]⚠[/yellow] WhatsApp bridge failed to start")
+                    bridge_process = None
+            except FileNotFoundError:
+                console.print("[yellow]⚠[/yellow] Node.js not found - WhatsApp bridge not started")
+                console.print("[dim]  Install Node.js or run the bridge manually: cd bridge && npm start[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not start WhatsApp bridge: {e}")
+        else:
+            console.print("[yellow]⚠[/yellow] WhatsApp bridge not built")
+            console.print("[dim]  Run: cd bridge && npm install && npm run build[/dim]")
     
     # Create components
     bus = MessageBus()
@@ -692,6 +732,8 @@ def gateway(
             
             await asyncio.gather(*tasks)
         except KeyboardInterrupt:
+            pass
+        finally:
             console.print("\nShutting down...")
             heartbeat.stop()
             cron.stop()
@@ -700,8 +742,26 @@ def gateway(
                 await webhook_server.stop()
             agent.stop()
             await channels.stop_all()
+            
+            # Stop WhatsApp bridge if we started it
+            if bridge_process and bridge_process.poll() is None:
+                console.print("[dim]Stopping WhatsApp bridge...[/dim]")
+                bridge_process.terminate()
+                try:
+                    bridge_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    bridge_process.kill()
+                console.print("[green]✓[/green] WhatsApp bridge stopped")
     
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # Ensure bridge is stopped even if asyncio.run fails
+        if bridge_process and bridge_process.poll() is None:
+            bridge_process.terminate()
+            bridge_process.wait(timeout=5)
 
 
 
