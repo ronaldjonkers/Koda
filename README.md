@@ -65,10 +65,40 @@ sudo apt install nodejs
 
 ## 📦 Installation
 
+### One-Line Install (Recommended)
+
+The easiest way to install Koda with all dependencies:
+
+```bash
+git clone https://github.com/ronaldjonkers/Koda.git
+cd Koda
+./install.sh
+```
+
+The install script automatically:
+- Detects your OS (macOS / Linux distros)
+- Installs Homebrew (macOS) if not present
+- Installs Python 3.11+
+- Installs Node.js 20+ (required for WhatsApp)
+- Installs uv (fast package manager)
+- Creates a virtual environment
+- Installs Koda with all optional dependencies
+- Builds the WhatsApp bridge
+
+**Supported systems:**
+- macOS (Intel & Apple Silicon)
+- Ubuntu / Debian / Pop!_OS
+- Fedora
+- CentOS / RHEL / Rocky / Alma
+- Arch / Manjaro
+- openSUSE
+
+### Manual Installation
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/koda.git
-cd koda
+git clone https://github.com/ronaldjonkers/Koda.git
+cd Koda
 
 # Create and activate a virtual environment
 python3.12 -m venv .venv
@@ -84,7 +114,7 @@ npm run build
 cd ..
 ```
 
-### Alternative: Install with uv (faster)
+### Install with uv (faster)
 
 ```bash
 # Install uv first: https://docs.astral.sh/uv/
