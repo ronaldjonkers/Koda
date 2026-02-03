@@ -1,0 +1,103 @@
+[project]
+name = "koda-assistant"
+version = "0.1.0-alpha"
+description = "Koda - Your intelligent personal assistant for calendars, email, contacts & messaging"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Koda Team"}
+]
+keywords = ["ai", "assistant", "calendar", "email", "whatsapp", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "typer>=0.9.0",
+    "litellm>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "websockets>=12.0",
+    "websocket-client>=1.6.0",
+    "httpx>=0.25.0",
+    "loguru>=0.7.0",
+    "readability-lxml>=0.8.0",
+    "rich>=13.0.0",
+    "croniter>=2.0.0",
+    "python-telegram-bot>=21.0",
+    # Google integrations (Calendar, Gmail)
+    "google-api-python-client>=2.100.0",
+    "google-auth-httplib2>=0.1.0",
+    "google-auth-oauthlib>=1.0.0",
+    # Microsoft Exchange (Calendar, Email)
+    "exchangelib>=5.0.0",
+    # iCloud Contacts
+    "pyicloud>=1.0.0",
+    # vCard parsing for contacts
+    "vobject>=0.9.6",
+    # Vector memory system
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    # Reminder system
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "aiosmtplib>=3.0.0",
+    # CalDAV calendar support
+    "caldav>=1.3.0",
+    "icalendar>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+koda = "koda.cli.commands:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["koda"]
+
+[tool.hatch.build.targets.wheel.sources]
+"koda" = "koda"
+
+# Include non-Python files in skills
+[tool.hatch.build]
+include = [
+    "koda/**/*.py",
+    "koda/skills/**/*.md",
+    "koda/skills/**/*.sh",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "koda/",
+    "bridge/",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"bridge" = "koda/bridge"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
