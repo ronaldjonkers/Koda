@@ -245,39 +245,263 @@ class SetupWizard:
     
     def _setup_calendar(self) -> None:
         """Configure calendar integration."""
-        console.print("\n[bold cyan]Calendar Integration[/bold cyan]")
-        console.print("[dim]Connect your calendar so Koda can:[/dim]")
-        console.print("  \u2022 Check your schedule and upcoming appointments")
-        console.print("  \u2022 Create, modify, and cancel events")
-        console.print("  \u2022 Send you reminders before meetings")
-        console.print("  \u2022 Help schedule meetings with others\n")
+        from koda.config.schema import CalendarAccount
         
-        console.print("[bold]Supported Calendar Types:[/bold]")
+        console.print("\n[bold cyan]Calendar Integration[/bold cyan]")
+        console.print("[dim]Connect your calendars so Koda can manage appointments.[/dim]\n")
+        
+        # Show existing accounts
+        accounts = self.config.integrations.calendar_accounts
+        
+        # Also check legacy configs and show them
+        legacy_accounts = []
+        if self.config.integrations.google.enabled:
+            legacy_accounts.append(("Google (API)", "google-legacy"))
+        if self.config.integrations.exchange.enabled:
+            legacy_accounts.append((f"Exchange ({self.config.integrations.exchange.email})", "exchange-legacy"))
+        if self.config.integrations.caldav.enabled:
+            legacy_accounts.append((f"CalDAV ({self.config.integrations.caldav.url[:30]}...)", "caldav-legacy"))
+        
+        if accounts or legacy_accounts:
+            console.print("[bold]Current Calendar Accounts:[/bold]")
+            for i, acc in enumerate(accounts):
+                status = "[green]✓[/green]" if acc.enabled else "[dim]○[/dim]"
+                console.print(f"  {status} {i+1}. [cyan]{acc.name}[/cyan] ({acc.type})")
+            for name, _ in legacy_accounts:
+                console.print(f"  [green]✓[/green] [cyan]{name}[/cyan] (legacy config)")
+            console.print()
+            
+            action = Prompt.ask(
+                "What would you like to do?",
+                choices=["add", "edit", "done"],
+                default="done"
+            )
+            
+            if action == "done":
+                return
+            elif action == "edit" and accounts:
+                idx = int(Prompt.ask("Which account to edit? (number)", default="1")) - 1
+                if 0 <= idx < len(accounts):
+                    self._edit_calendar_account(idx)
+                return
+        else:
+            console.print("[dim]No calendar accounts configured yet.[/dim]\n")
+        
+        # Add new account
+        self._add_calendar_account()
+    
+    def _add_calendar_account(self) -> None:
+        """Add a new calendar account."""
+        from koda.config.schema import CalendarAccount
+        
+        console.print("[bold]Add Calendar Account[/bold]\n")
+        console.print("[bold]Supported Types:[/bold]")
         console.print("  [cyan]gmail[/cyan]    - Google Calendar via CalDAV (simple, app password)")
-        console.print("  [cyan]google[/cyan]   - Google Calendar via API (complex, OAuth setup)")
-        console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
         console.print("  [cyan]icloud[/cyan]   - Apple iCloud Calendar")
-        console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, Radicale, or custom CalDAV\n")
+        console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
+        console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, or custom CalDAV")
+        console.print("  [cyan]google[/cyan]   - Google Calendar via API (complex, OAuth)\n")
         
         cal_type = Prompt.ask(
             "Select calendar type",
-            choices=["gmail", "google", "exchange", "icloud", "caldav", "none"],
-            default="none"
+            choices=["gmail", "icloud", "exchange", "caldav", "google", "cancel"],
+            default="gmail"
         )
         
-        if cal_type == "none":
+        if cal_type == "cancel":
             return
         
+        # Ask for account name
+        default_name = {
+            "gmail": "Gmail Calendar",
+            "icloud": "iCloud Calendar", 
+            "exchange": "Work Calendar",
+            "caldav": "CalDAV Calendar",
+            "google": "Google Calendar"
+        }.get(cal_type, "My Calendar")
+        
+        name = Prompt.ask("Account name", default=default_name)
+        
+        # Create account based on type
+        account = CalendarAccount(name=name, type=cal_type, enabled=True)
+        
         if cal_type == "gmail":
-            self._setup_gmail_caldav()
-        elif cal_type == "google":
-            self._setup_google_calendar()
-        elif cal_type == "exchange":
-            self._setup_exchange()
+            success = self._configure_gmail_calendar(account)
         elif cal_type == "icloud":
-            self._setup_icloud_caldav()
+            success = self._configure_icloud_calendar(account)
+        elif cal_type == "exchange":
+            success = self._configure_exchange_calendar(account)
         elif cal_type == "caldav":
-            self._setup_caldav()
+            success = self._configure_caldav_calendar(account)
+        elif cal_type == "google":
+            success = self._configure_google_api_calendar(account)
+        else:
+            success = False
+        
+        if success:
+            self.config.integrations.calendar_accounts.append(account)
+            console.print(f"\n[green]✓[/green] Calendar account '{name}' added successfully!")
+        else:
+            if not Confirm.ask("Configuration failed. Try again?", default=True):
+                return
+            self._add_calendar_account()
+    
+    def _configure_gmail_calendar(self, account: "CalendarAccount") -> bool:
+        """Configure Gmail CalDAV calendar."""
+        console.print("\n[bold]Gmail Calendar Setup[/bold]")
+        console.print("[dim]Use your Gmail and an App Password.[/dim]\n")
+        console.print("[bold]Create an App Password:[/bold]")
+        console.print("  1. Go to [cyan]https://myaccount.google.com/apppasswords[/cyan]")
+        console.print("  2. Select 'Mail' and 'Other (Custom name)'")
+        console.print("  3. Enter 'Koda' and copy the 16-character password\n")
+        
+        email = Prompt.ask("Gmail address")
+        password = Prompt.ask("App password", password=True)
+        
+        account.type = "caldav"
+        account.url = f"https://apidata.googleusercontent.com/caldav/v2/{email}/events"
+        account.email = email
+        account.password = password
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_caldav(account.url, email, password)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_icloud_calendar(self, account: "CalendarAccount") -> bool:
+        """Configure iCloud CalDAV calendar."""
+        console.print("\n[bold]iCloud Calendar Setup[/bold]")
+        console.print("[dim]Use your Apple ID and an App-Specific Password.[/dim]\n")
+        console.print("[bold]Create an App-Specific Password:[/bold]")
+        console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
+        console.print("  2. Sign in → App-Specific Passwords → Create\n")
+        
+        email = Prompt.ask("Apple ID email")
+        password = Prompt.ask("App-Specific Password", password=True)
+        
+        account.type = "caldav"
+        account.url = "https://caldav.icloud.com"
+        account.email = email
+        account.password = password
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_caldav(account.url, email, password)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_exchange_calendar(self, account: "CalendarAccount") -> bool:
+        """Configure Exchange calendar."""
+        console.print("\n[bold]Exchange Calendar Setup[/bold]")
+        console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
+        
+        email = Prompt.ask("Email address")
+        username = Prompt.ask("Username (leave empty if same as email)", default="")
+        password = Prompt.ask("Password", password=True)
+        server = Prompt.ask("Server (e.g., outlook.office365.com)", default="outlook.office365.com")
+        
+        account.type = "exchange"
+        account.email = email
+        account.username = username or email
+        account.password = password
+        account.server = server
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_exchange(email, password, server, username)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_caldav_calendar(self, account: "CalendarAccount") -> bool:
+        """Configure generic CalDAV calendar."""
+        console.print("\n[bold]CalDAV Calendar Setup[/bold]")
+        console.print("[dim]Connect to any CalDAV server.[/dim]\n")
+        console.print("Common CalDAV URLs:")
+        console.print("  [cyan]Nextcloud:[/cyan] https://your-server/remote.php/dav")
+        console.print("  [cyan]Radicale:[/cyan]  https://your-server/username/calendar.ics\n")
+        
+        url = Prompt.ask("CalDAV URL")
+        username = Prompt.ask("Username")
+        password = Prompt.ask("Password", password=True)
+        
+        account.type = "caldav"
+        account.url = url
+        account.email = username
+        account.password = password
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_caldav(url, username, password)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_google_api_calendar(self, account: "CalendarAccount") -> bool:
+        """Configure Google Calendar via OAuth API."""
+        console.print("\n[bold]Google Calendar API Setup[/bold]")
+        console.print("[yellow]Note:[/yellow] This is complex. Consider using 'gmail' option instead.\n")
+        console.print("Steps:")
+        console.print("  1. Go to [cyan]https://console.cloud.google.com/[/cyan]")
+        console.print("  2. Create project → Enable Google Calendar API")
+        console.print("  3. Create OAuth credentials → Download JSON\n")
+        
+        creds_file = Prompt.ask("Path to credentials file", default="~/.koda/google_credentials.json")
+        
+        account.type = "google"
+        account.credentials_file = creds_file
+        
+        if Path(creds_file).expanduser().exists():
+            console.print("[green]✓[/green] Credentials file found")
+            return True
+        else:
+            console.print("[yellow]![/yellow] File not found - add it later")
+            return Confirm.ask("Continue anyway?", default=True)
+    
+    def _edit_calendar_account(self, idx: int) -> None:
+        """Edit an existing calendar account."""
+        account = self.config.integrations.calendar_accounts[idx]
+        console.print(f"\n[bold]Editing: {account.name}[/bold]")
+        
+        action = Prompt.ask(
+            "Action",
+            choices=["rename", "reconfigure", "disable", "delete", "cancel"],
+            default="cancel"
+        )
+        
+        if action == "rename":
+            account.name = Prompt.ask("New name", default=account.name)
+        elif action == "reconfigure":
+            # Re-run configuration for this account type
+            if account.type == "caldav":
+                self._configure_caldav_calendar(account)
+            elif account.type == "exchange":
+                self._configure_exchange_calendar(account)
+            elif account.type == "google":
+                self._configure_google_api_calendar(account)
+        elif action == "disable":
+            account.enabled = not account.enabled
+            status = "enabled" if account.enabled else "disabled"
+            console.print(f"[green]✓[/green] Account {status}")
+        elif action == "delete":
+            if Confirm.ask(f"Delete '{account.name}'?", default=False):
+                self.config.integrations.calendar_accounts.pop(idx)
+                console.print("[green]✓[/green] Account deleted")
     
     def _setup_gmail_caldav(self) -> None:
         """Configure Gmail Calendar via CalDAV (simpler than OAuth)."""
@@ -507,37 +731,242 @@ class SetupWizard:
     
     def _setup_email(self) -> None:
         """Configure email integration."""
-        console.print("\n[bold cyan]Email Integration (Read)[/bold cyan]")
-        console.print("[dim]Allow Koda to read your inbox so it can:[/dim]")
-        console.print("  • Summarize unread emails")
-        console.print("  • Search for specific messages")
-        console.print("  • Extract information from emails")
-        console.print("  • Alert you about important messages\n")
+        from koda.config.schema import EmailAccount
         
-        console.print("[bold]Supported Email Types:[/bold]")
+        console.print("\n[bold cyan]Email Integration (Read)[/bold cyan]")
+        console.print("[dim]Connect your email so Koda can read and manage your inbox.[/dim]\n")
+        
+        # Show existing accounts
+        accounts = self.config.integrations.email_accounts
+        
+        # Also check legacy configs
+        legacy_accounts = []
+        if self.config.integrations.google.enabled:
+            legacy_accounts.append(("Gmail (API)", "google-legacy"))
+        if self.config.integrations.exchange.enabled:
+            legacy_accounts.append((f"Exchange ({self.config.integrations.exchange.email})", "exchange-legacy"))
+        if self.config.integrations.imap.enabled:
+            legacy_accounts.append((f"IMAP ({self.config.integrations.imap.username})", "imap-legacy"))
+        
+        if accounts or legacy_accounts:
+            console.print("[bold]Current Email Accounts:[/bold]")
+            for i, acc in enumerate(accounts):
+                status = "[green]✓[/green]" if acc.enabled else "[dim]○[/dim]"
+                console.print(f"  {status} {i+1}. [cyan]{acc.name}[/cyan] ({acc.type})")
+            for name, _ in legacy_accounts:
+                console.print(f"  [green]✓[/green] [cyan]{name}[/cyan] (legacy config)")
+            console.print()
+            
+            action = Prompt.ask(
+                "What would you like to do?",
+                choices=["add", "edit", "done"],
+                default="done"
+            )
+            
+            if action == "done":
+                return
+            elif action == "edit" and accounts:
+                idx = int(Prompt.ask("Which account to edit? (number)", default="1")) - 1
+                if 0 <= idx < len(accounts):
+                    self._edit_email_account(idx)
+                return
+        else:
+            console.print("[dim]No email accounts configured yet.[/dim]\n")
+        
+        # Add new account
+        self._add_email_account()
+    
+    def _add_email_account(self) -> None:
+        """Add a new email account."""
+        from koda.config.schema import EmailAccount
+        
+        console.print("[bold]Add Email Account[/bold]\n")
+        console.print("[bold]Supported Types:[/bold]")
         console.print("  [cyan]gmail[/cyan]    - Gmail via IMAP (simple, app password)")
         console.print("  [cyan]icloud[/cyan]   - iCloud Mail via IMAP")
         console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
-        console.print("  [cyan]imap[/cyan]     - Any other email provider with IMAP\n")
+        console.print("  [cyan]imap[/cyan]     - Any other email provider\n")
         
         email_type = Prompt.ask(
             "Select email type",
-            choices=["gmail", "icloud", "exchange", "imap", "none"],
-            default="none"
+            choices=["gmail", "icloud", "exchange", "imap", "cancel"],
+            default="gmail"
         )
         
-        if email_type == "none":
+        if email_type == "cancel":
             return
         
+        # Ask for account name
+        default_name = {
+            "gmail": "Gmail",
+            "icloud": "iCloud Mail",
+            "exchange": "Work Email",
+            "imap": "Email"
+        }.get(email_type, "My Email")
+        
+        name = Prompt.ask("Account name", default=default_name)
+        
+        # Create account based on type
+        account = EmailAccount(name=name, type=email_type, enabled=True)
+        
         if email_type == "gmail":
-            self._setup_gmail_imap()
+            success = self._configure_gmail_email(account)
         elif email_type == "icloud":
-            self._setup_icloud_imap()
+            success = self._configure_icloud_email(account)
         elif email_type == "exchange":
-            if not self.config.integrations.exchange.enabled:
-                self._setup_exchange()
+            success = self._configure_exchange_email(account)
         elif email_type == "imap":
-            self._setup_imap()
+            success = self._configure_imap_email(account)
+        else:
+            success = False
+        
+        if success:
+            self.config.integrations.email_accounts.append(account)
+            console.print(f"\n[green]✓[/green] Email account '{name}' added successfully!")
+        else:
+            if not Confirm.ask("Configuration failed. Try again?", default=True):
+                return
+            self._add_email_account()
+    
+    def _configure_gmail_email(self, account: "EmailAccount") -> bool:
+        """Configure Gmail via IMAP."""
+        console.print("\n[bold]Gmail Setup[/bold]")
+        console.print("[dim]Use your Gmail and an App Password.[/dim]\n")
+        console.print("[bold]Create an App Password:[/bold]")
+        console.print("  1. Go to [cyan]https://myaccount.google.com/apppasswords[/cyan]")
+        console.print("  2. Select 'Mail' and 'Other (Custom name)'")
+        console.print("  3. Enter 'Koda' and copy the 16-character password\n")
+        
+        email = Prompt.ask("Gmail address")
+        password = Prompt.ask("App password", password=True)
+        
+        account.type = "imap"
+        account.host = "imap.gmail.com"
+        account.port = 993
+        account.email = email
+        account.password = password
+        account.use_ssl = True
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_imap("imap.gmail.com", 993, email, password, True)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_icloud_email(self, account: "EmailAccount") -> bool:
+        """Configure iCloud Mail via IMAP."""
+        console.print("\n[bold]iCloud Mail Setup[/bold]")
+        console.print("[dim]Use your Apple ID and an App-Specific Password.[/dim]\n")
+        console.print("[bold]Create an App-Specific Password:[/bold]")
+        console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
+        console.print("  2. Sign in → App-Specific Passwords → Create\n")
+        
+        email = Prompt.ask("Apple ID email")
+        password = Prompt.ask("App-Specific Password", password=True)
+        
+        account.type = "imap"
+        account.host = "imap.mail.me.com"
+        account.port = 993
+        account.email = email
+        account.password = password
+        account.use_ssl = True
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_imap("imap.mail.me.com", 993, email, password, True)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_exchange_email(self, account: "EmailAccount") -> bool:
+        """Configure Exchange email."""
+        console.print("\n[bold]Exchange Email Setup[/bold]")
+        console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
+        
+        email = Prompt.ask("Email address")
+        username = Prompt.ask("Username (leave empty if same as email)", default="")
+        password = Prompt.ask("Password", password=True)
+        server = Prompt.ask("Server (e.g., outlook.office365.com)", default="outlook.office365.com")
+        
+        account.type = "exchange"
+        account.email = email
+        account.username = username or email
+        account.password = password
+        account.server = server
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_exchange(email, password, server, username)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _configure_imap_email(self, account: "EmailAccount") -> bool:
+        """Configure generic IMAP email."""
+        console.print("\n[bold]IMAP Email Setup[/bold]")
+        console.print("[dim]Connect to any IMAP mail server.[/dim]\n")
+        console.print("Common IMAP servers:")
+        console.print("  [cyan]Outlook:[/cyan]    outlook.office365.com (port 993)")
+        console.print("  [cyan]Yahoo:[/cyan]      imap.mail.yahoo.com (port 993)\n")
+        
+        host = Prompt.ask("IMAP server")
+        port = int(Prompt.ask("Port", default="993"))
+        email = Prompt.ask("Email address")
+        password = Prompt.ask("Password", password=True)
+        
+        account.type = "imap"
+        account.host = host
+        account.port = port
+        account.email = email
+        account.password = password
+        account.use_ssl = True
+        
+        console.print("Testing connection...", end=" ")
+        success, message = self._test_imap(host, port, email, password, True)
+        
+        if success:
+            console.print(f"[green]✓[/green] {message}")
+            return True
+        else:
+            console.print(f"[red]✗[/red] {message}")
+            return False
+    
+    def _edit_email_account(self, idx: int) -> None:
+        """Edit an existing email account."""
+        account = self.config.integrations.email_accounts[idx]
+        console.print(f"\n[bold]Editing: {account.name}[/bold]")
+        
+        action = Prompt.ask(
+            "Action",
+            choices=["rename", "reconfigure", "disable", "delete", "cancel"],
+            default="cancel"
+        )
+        
+        if action == "rename":
+            account.name = Prompt.ask("New name", default=account.name)
+        elif action == "reconfigure":
+            if account.type == "imap":
+                self._configure_imap_email(account)
+            elif account.type == "exchange":
+                self._configure_exchange_email(account)
+        elif action == "disable":
+            account.enabled = not account.enabled
+            status = "enabled" if account.enabled else "disabled"
+            console.print(f"[green]✓[/green] Account {status}")
+        elif action == "delete":
+            if Confirm.ask(f"Delete '{account.name}'?", default=False):
+                self.config.integrations.email_accounts.pop(idx)
+                console.print("[green]✓[/green] Account deleted")
     
     def _setup_gmail_imap(self) -> None:
         """Configure Gmail via IMAP (simpler than OAuth)."""
