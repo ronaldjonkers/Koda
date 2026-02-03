@@ -20,10 +20,10 @@ RUN mkdir -p koda bridge && touch koda/__init__.py && \
     uv pip install --system --no-cache . && \
     rm -rf koda bridge
 
-# Copy the full source and install
+# Copy the full source and install with optional web tools
 COPY koda/ koda/
 COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+RUN uv pip install --system --no-cache ".[web]"
 
 # Build the messaging bridge
 WORKDIR /app/bridge

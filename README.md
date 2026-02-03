@@ -21,8 +21,10 @@
 ### Technical Powerhouse
 - 🛠️ **Script Automation** - Generate and execute Python, Bash, and Node.js scripts
 - 🧠 **Vector Memory** - Persistent semantic memory with ChromaDB embeddings
-- 🔍 **Web Search** - Brave Search integration for real-time information
-- � **Shell Execution** - Direct system command execution
+- 🔍 **Web Search** - Multiple options: Brave Search (paid) or DuckDuckGo (free)
+- 📖 **Wikipedia** - Direct Wikipedia article access (free, multi-language)
+- 🌐 **Web Fetch** - Extract content from any URL using Trafilatura
+- 💻 **Shell Execution** - Direct system command execution
 
 ### Communication Hub
 - � **Messaging Integration** - WhatsApp & Telegram bot capabilities
@@ -579,8 +581,10 @@ Koda comes with a comprehensive set of tools:
 | `reminder` | Schedule reminders |
 | `script` | Generate/execute scripts |
 | `exec` | Shell command execution |
-| `web_search` | Brave Search API |
-| `web_fetch` | Fetch web pages |
+| `web_search` | Brave Search API (requires API key) |
+| `ddg_search` | DuckDuckGo search (free, no API key) |
+| `wikipedia` | Wikipedia articles (free, multi-language) |
+| `web_fetch` | Fetch & extract web content (trafilatura) |
 | `read_file` | Read files |
 | `write_file` | Write files |
 | `edit_file` | Edit files |
