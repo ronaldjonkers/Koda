@@ -476,16 +476,30 @@ class SetupWizard:
     def _edit_calendar_account(self, idx: int) -> None:
         """Edit an existing calendar account."""
         account = self.config.integrations.calendar_accounts[idx]
-        console.print(f"\n[bold]Editing: {account.name}[/bold]")
+        
+        # Show current settings
+        console.print(f"\n[bold]Calendar Account: {account.name}[/bold]")
+        console.print(f"  [cyan]Type:[/cyan]    {account.type}")
+        console.print(f"  [cyan]Status:[/cyan]  {'Enabled' if account.enabled else 'Disabled'}")
+        if account.type == "caldav":
+            console.print(f"  [cyan]URL:[/cyan]     {account.url[:50]}{'...' if len(account.url) > 50 else ''}")
+            console.print(f"  [cyan]User:[/cyan]    {account.email}")
+        elif account.type == "exchange":
+            console.print(f"  [cyan]Email:[/cyan]   {account.email}")
+            console.print(f"  [cyan]Server:[/cyan]  {account.server}")
+        elif account.type == "google":
+            console.print(f"  [cyan]Credentials:[/cyan] {account.credentials_file}")
+        console.print()
         
         action = Prompt.ask(
             "Action",
-            choices=["rename", "reconfigure", "disable", "delete", "cancel"],
-            default="cancel"
+            choices=["rename", "reconfigure", "toggle", "delete", "back"],
+            default="back"
         )
         
         if action == "rename":
             account.name = Prompt.ask("New name", default=account.name)
+            console.print(f"[green]✓[/green] Renamed to '{account.name}'")
         elif action == "reconfigure":
             # Re-run configuration for this account type
             if account.type == "caldav":
@@ -494,7 +508,7 @@ class SetupWizard:
                 self._configure_exchange_calendar(account)
             elif account.type == "google":
                 self._configure_google_api_calendar(account)
-        elif action == "disable":
+        elif action == "toggle":
             account.enabled = not account.enabled
             status = "enabled" if account.enabled else "disabled"
             console.print(f"[green]✓[/green] Account {status}")
@@ -944,22 +958,36 @@ class SetupWizard:
     def _edit_email_account(self, idx: int) -> None:
         """Edit an existing email account."""
         account = self.config.integrations.email_accounts[idx]
-        console.print(f"\n[bold]Editing: {account.name}[/bold]")
+        
+        # Show current settings
+        console.print(f"\n[bold]Email Account: {account.name}[/bold]")
+        console.print(f"  [cyan]Type:[/cyan]    {account.type}")
+        console.print(f"  [cyan]Status:[/cyan]  {'Enabled' if account.enabled else 'Disabled'}")
+        if account.type == "imap":
+            console.print(f"  [cyan]Server:[/cyan]  {account.host}:{account.port}")
+            console.print(f"  [cyan]Email:[/cyan]   {account.email}")
+        elif account.type == "exchange":
+            console.print(f"  [cyan]Email:[/cyan]   {account.email}")
+            console.print(f"  [cyan]Server:[/cyan]  {account.server}")
+        elif account.type == "gmail":
+            console.print(f"  [cyan]Credentials:[/cyan] {account.google_credentials_file}")
+        console.print()
         
         action = Prompt.ask(
             "Action",
-            choices=["rename", "reconfigure", "disable", "delete", "cancel"],
-            default="cancel"
+            choices=["rename", "reconfigure", "toggle", "delete", "back"],
+            default="back"
         )
         
         if action == "rename":
             account.name = Prompt.ask("New name", default=account.name)
+            console.print(f"[green]✓[/green] Renamed to '{account.name}'")
         elif action == "reconfigure":
             if account.type == "imap":
                 self._configure_imap_email(account)
             elif account.type == "exchange":
                 self._configure_exchange_email(account)
-        elif action == "disable":
+        elif action == "toggle":
             account.enabled = not account.enabled
             status = "enabled" if account.enabled else "disabled"
             console.print(f"[green]✓[/green] Account {status}")
