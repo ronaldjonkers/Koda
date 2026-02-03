@@ -139,6 +139,172 @@ koda config --test
 koda agent -m "What's on my calendar today?"
 ```
 
+## 🤖 LLM Providers
+
+Koda works with any LLM provider that supports the OpenAI API format.
+
+### Supported Providers
+
+| Provider | Purpose | Get API Key |
+|----------|---------|-------------|
+| `openrouter` | Access to all models (recommended) | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `anthropic` | Claude direct | [console.anthropic.com](https://console.anthropic.com) |
+| `openai` | GPT direct | [platform.openai.com](https://platform.openai.com) |
+| `groq` | Fast inference + **Voice transcription** | [console.groq.com](https://console.groq.com) |
+| `gemini` | Google Gemini | [aistudio.google.com](https://aistudio.google.com) |
+| `vllm` | Local models via vLLM | Self-hosted |
+| `ollama` | Local models via Ollama | Self-hosted |
+| `lmstudio` | Local models via LM Studio | Self-hosted |
+
+### Basic Configuration
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-20250514"
+    }
+  }
+}
+```
+
+## 🖥️ Local Models
+
+Run Koda with your own local models using vLLM, Ollama, or LM Studio.
+
+### Option 1: vLLM (Recommended for production)
+
+**1. Start your vLLM server**
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+```
+
+**2. Configure** (`~/.koda/config.json`)
+
+```json
+{
+  "providers": {
+    "vllm": {
+      "apiKey": "dummy",
+      "apiBase": "http://localhost:8000/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "meta-llama/Llama-3.1-8B-Instruct"
+    }
+  }
+}
+```
+
+**3. Chat**
+
+```bash
+koda agent -m "Hello from my local LLM!"
+```
+
+### Option 2: Ollama (Easy setup)
+
+**1. Install and run Ollama**
+
+```bash
+# Install Ollama: https://ollama.ai
+ollama pull llama3.1
+ollama serve
+```
+
+**2. Configure** (`~/.koda/config.json`)
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiKey": "ollama",
+      "apiBase": "http://localhost:11434/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "llama3.1"
+    }
+  }
+}
+```
+
+### Option 3: LM Studio (GUI-based)
+
+**1. Download and run LM Studio**
+- Download from [lmstudio.ai](https://lmstudio.ai)
+- Load a model and start the local server
+
+**2. Configure** (`~/.koda/config.json`)
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "apiKey": "lm-studio",
+      "apiBase": "http://localhost:1234/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "local-model"
+    }
+  }
+}
+```
+
+> **Tip:** The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+### Any OpenAI-Compatible Server
+
+Koda works with any server that implements the OpenAI API format:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "your-key-or-dummy",
+      "apiBase": "http://your-server:port/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "your-model-name"
+    }
+  }
+}
+```
+
+## 🎤 Voice Transcription
+
+Koda supports voice message transcription via Groq's Whisper API (free tier available).
+
+**1. Get a Groq API key** from [console.groq.com](https://console.groq.com)
+
+**2. Configure** (`~/.koda/config.json`)
+
+```json
+{
+  "providers": {
+    "groq": {
+      "apiKey": "gsk_xxx"
+    }
+  }
+}
+```
+
+**3. Send voice messages** via Telegram or WhatsApp — they will be automatically transcribed.
+
+> **Note:** Groq provides free voice transcription via Whisper. If configured, voice messages will be automatically transcribed before processing.
+
 ## 📅 Calendar Integration
 
 ### Google Calendar
