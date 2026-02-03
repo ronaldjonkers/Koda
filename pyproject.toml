@@ -57,6 +57,11 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+web = [
+    # Free web search and content extraction
+    "duckduckgo-search>=4.0.0",  # Free search, no API key needed
+    "trafilatura>=1.6.0",        # Better content extraction than readability
+]
 
 [project.scripts]
 koda = "koda.cli.commands:app"

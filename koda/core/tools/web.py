@@ -1,4 +1,4 @@
-"""Web tools: web_search and web_fetch."""
+"""Web tools: web_search, web_fetch, and free alternatives."""
 
 import html
 import json
@@ -90,11 +90,127 @@ class WebSearchTool(Tool):
             return f"Error: {e}"
 
 
+class DuckDuckGoSearchTool(Tool):
+    """Search the web using DuckDuckGo - completely free, no API key needed."""
+    
+    name = "ddg_search"
+    description = "Search the web using DuckDuckGo (free, no API key). Returns titles, URLs, and snippets."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+        },
+        "required": ["query"]
+    }
+    
+    def __init__(self, max_results: int = 5):
+        self.max_results = max_results
+    
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            return "Error: duckduckgo-search not installed. Run: pip install duckduckgo-search"
+        
+        try:
+            n = min(max(count or self.max_results, 1), 10)
+            
+            # DuckDuckGo search is synchronous, run in executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            def do_search():
+                with DDGS() as ddgs:
+                    return list(ddgs.text(query, max_results=n))
+            
+            results = await loop.run_in_executor(None, do_search)
+            
+            if not results:
+                return f"No results for: {query}"
+            
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                lines.append(f"{i}. {item.get('title', '')}")
+                lines.append(f"   {item.get('href', '')}")
+                if body := item.get("body"):
+                    lines.append(f"   {body}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error: {e}"
+
+
+class WikipediaSearchTool(Tool):
+    """Search and read Wikipedia articles - completely free."""
+    
+    name = "wikipedia"
+    description = "Search Wikipedia and get article content. Free, no API key needed."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query or article title"},
+            "lang": {"type": "string", "description": "Language code (en, nl, de, etc.)", "default": "en"},
+            "sentences": {"type": "integer", "description": "Number of sentences to return (0 for full article)", "minimum": 0, "maximum": 50}
+        },
+        "required": ["query"]
+    }
+    
+    async def execute(self, query: str, lang: str = "en", sentences: int = 10, **kwargs: Any) -> str:
+        try:
+            # Use Wikipedia API directly - no external library needed
+            api_url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{query.replace(' ', '_')}"
+            
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+                
+                # If not found, try search
+                if r.status_code == 404:
+                    search_url = f"https://{lang}.wikipedia.org/w/api.php"
+                    params = {
+                        "action": "opensearch",
+                        "search": query,
+                        "limit": 5,
+                        "format": "json"
+                    }
+                    sr = await client.get(search_url, params=params)
+                    sr.raise_for_status()
+                    data = sr.json()
+                    
+                    if len(data) >= 2 and data[1]:
+                        # Return search suggestions
+                        suggestions = data[1][:5]
+                        return f"Article '{query}' not found. Did you mean:\n" + "\n".join(f"- {s}" for s in suggestions)
+                    return f"No Wikipedia article found for: {query}"
+                
+                r.raise_for_status()
+                data = r.json()
+            
+            title = data.get("title", query)
+            extract = data.get("extract", "")
+            url = data.get("content_urls", {}).get("desktop", {}).get("page", "")
+            
+            # If user wants full article, fetch it
+            if sentences == 0:
+                html_url = f"https://{lang}.wikipedia.org/api/rest_v1/page/html/{query.replace(' ', '_')}"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    hr = await client.get(html_url, headers={"User-Agent": USER_AGENT})
+                    if hr.status_code == 200:
+                        extract = _normalize(_strip_tags(hr.text))[:20000]
+            
+            result = f"# {title}\n\n{extract}"
+            if url:
+                result += f"\n\nSource: {url}"
+            return result
+            
+        except Exception as e:
+            return f"Error: {e}"
+
+
 class WebFetchTool(Tool):
-    """Fetch and extract content from a URL using Readability."""
+    """Fetch and extract content from a URL using multiple extractors."""
     
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = "Fetch URL and extract readable content. Uses trafilatura (best) or readability as fallback."
     parameters = {
         "type": "object",
         "properties": {
@@ -109,8 +225,6 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
     
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
-        from readability import Document
-
         max_chars = maxChars or self.max_chars
 
         # Validate URL before fetching
@@ -132,12 +246,9 @@ class WebFetchTool(Tool):
             # JSON
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2), "json"
-            # HTML
+            # HTML - try trafilatura first, then readability
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
-                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                extractor = "readability"
+                text, extractor = self._extract_content(r.text, extractMode)
             else:
                 text, extractor = r.text, "raw"
             
@@ -150,9 +261,39 @@ class WebFetchTool(Tool):
         except Exception as e:
             return json.dumps({"error": str(e), "url": url})
     
+    def _extract_content(self, html_content: str, mode: str) -> tuple:
+        """Extract content using trafilatura (preferred) or readability (fallback)."""
+        # Try trafilatura first - generally better extraction
+        try:
+            import trafilatura
+            if mode == "markdown":
+                text = trafilatura.extract(html_content, include_links=True, include_formatting=True, output_format="markdown")
+            else:
+                text = trafilatura.extract(html_content, include_links=False)
+            if text:
+                return text, "trafilatura"
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
+        # Fallback to readability
+        try:
+            from readability import Document
+            doc = Document(html_content)
+            content = self._to_markdown(doc.summary()) if mode == "markdown" else _strip_tags(doc.summary())
+            text = f"# {doc.title()}\n\n{content}" if doc.title() else content
+            return text, "readability"
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
+        # Last resort: basic tag stripping
+        return _normalize(_strip_tags(html_content)), "basic"
+    
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""
-        # Convert links, headings, lists before stripping tags
         text = re.sub(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
                       lambda m: f'[{_strip_tags(m[2])}]({m[1]})', html, flags=re.I)
         text = re.sub(r'<h([1-6])[^>]*>([\s\S]*?)</h\1>',

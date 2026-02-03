@@ -14,7 +14,7 @@ from koda.core.context import ContextBuilder
 from koda.core.tools.registry import ToolRegistry
 from koda.core.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from koda.core.tools.shell import ExecTool
-from koda.core.tools.web import WebSearchTool, WebFetchTool
+from koda.core.tools.web import WebSearchTool, WebFetchTool, DuckDuckGoSearchTool, WikipediaSearchTool
 from koda.core.tools.message import MessageTool
 from koda.core.tools.spawn import SpawnTool
 from koda.core.tools.calendar import GoogleCalendarTool, ExchangeCalendarTool
@@ -94,8 +94,10 @@ class AgentLoop:
         self.tools.register(ExecTool(working_dir=str(self.workspace)))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        self.tools.register(WebSearchTool(api_key=self.brave_api_key))  # Brave (paid)
+        self.tools.register(DuckDuckGoSearchTool())  # Free alternative
+        self.tools.register(WikipediaSearchTool())   # Free Wikipedia access
+        self.tools.register(WebFetchTool())          # URL fetching with trafilatura
         
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
