@@ -23,6 +23,7 @@ from koda.core.tools.email import GmailTool, ExchangeEmailTool
 from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
 from koda.core.tools.script import ScriptTool
+from koda.core.tools.linkedin import LinkedInTool
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
 from koda.session.manager import SessionManager
@@ -141,6 +142,15 @@ class AgentLoop:
         
         # Script tool (Python, Bash, Node.js)
         self.tools.register(ScriptTool(workspace=self.workspace))
+        
+        # LinkedIn tool
+        linkedin_cfg = self.calendar_config.get("linkedin", {})
+        if linkedin_cfg.get("enabled"):
+            self.tools.register(LinkedInTool(
+                email=linkedin_cfg.get("email", ""),
+                password=linkedin_cfg.get("password", ""),
+                enabled=True
+            ))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""

@@ -62,6 +62,10 @@ web = [
     "duckduckgo-search>=4.0.0",  # Free search, no API key needed
     "trafilatura>=1.6.0",        # Better content extraction than readability
 ]
+linkedin = [
+    # LinkedIn automation (unofficial API)
+    "linkedin-api>=2.0.0",
+]
 
 [project.scripts]
 koda = "koda.cli.commands:app"

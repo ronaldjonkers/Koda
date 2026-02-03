@@ -494,7 +494,144 @@ koda gateway
 - **Owner Escalation**: Forward appointment requests to the owner
 - **Automatic Greeting**: Customizable welcome message
 
-## 👥 Contacts & Birthdays
+## � LinkedIn Integration
+
+Koda can manage your LinkedIn presence with intelligent automation.
+
+### Features
+
+- **Message Monitoring**: Identify and respond to interesting messages
+- **Auto-Accept Connections**: Accept relevant connection requests automatically
+- **Feed Curation**: Collect interesting posts for daily review
+- **Daily Digest**: Get a WhatsApp/Telegram summary with suggested actions
+- **Smart Replies**: AI-generated reply suggestions
+- **Post Creation**: Generate and publish posts (when trust level allows)
+
+### Installation
+
+```bash
+pip install koda-assistant[linkedin]
+```
+
+### Setup
+
+```bash
+koda config linkedin
+```
+
+The setup wizard will ask for:
+1. **LinkedIn credentials** (email/password)
+2. **Your role** - What you do professionally
+3. **Your goals** - What you're looking for on LinkedIn
+4. **Interests** - Topics you care about
+5. **Automation preferences** - What to auto-accept/reply
+
+### Configuration
+
+```json
+{
+  "integrations": {
+    "linkedin": {
+      "enabled": true,
+      "email": "your-email@example.com",
+      "password": "your-linkedin-password",
+      
+      "user_role": "Software Engineer at TechCorp",
+      "user_goals": "Connect with other developers, find collaboration opportunities",
+      "user_interests": ["AI", "Python", "startups"],
+      
+      "auto_accept_connections": true,
+      "auto_reply_messages": false,
+      "auto_post": false,
+      "auto_react": false,
+      
+      "daily_digest_enabled": true,
+      "daily_digest_time": "09:00",
+      "daily_digest_channel": "whatsapp",
+      "daily_digest_recipient": "+31612345678",
+      
+      "connection_keywords": ["developer", "engineer", "founder"],
+      "ignore_keywords": ["sales", "recruitment"],
+      
+      "trust_level": 0
+    }
+  }
+}
+```
+
+### Trust Levels
+
+Control how much automation Koda performs:
+
+| Level | Capabilities |
+|-------|-------------|
+| 0 | Manual only - suggestions via digest |
+| 1 | Auto-accept connections matching keywords |
+| 2 | Auto-accept all relevant connections |
+| 3 | Auto-reply to messages |
+| 4 | Auto-like relevant posts |
+| 5 | Full automation including posting |
+
+Increase trust level as you gain confidence in Koda's responses:
+
+```bash
+koda agent -m "Set my LinkedIn trust level to 2"
+```
+
+### Daily Digest
+
+Every day at your configured time, Koda sends a digest via WhatsApp/Telegram:
+
+```
+📊 LinkedIn Daily Digest - 03 February 2026
+
+✅ Auto-accepted 5 connections:
+  • John Smith
+  • Jane Doe
+  • ...
+
+💬 3 new messages:
+  • John Smith: Hi! I saw your post about...
+  • ...
+
+🤝 2 connection requests to review:
+  • Mark Johnson - CEO at StartupXYZ
+  • ...
+
+📰 5 interesting posts:
+  • Sarah Chen: Great insights on AI development...
+  • ...
+
+💡 4 suggested actions:
+  • [reply] John Smith
+    Suggestion: Thanks for reaching out! I'd love to...
+  • ...
+
+Reply with action numbers to execute, or 'skip' to dismiss.
+```
+
+### Usage Examples
+
+```bash
+# Check LinkedIn messages
+koda agent -m "Check my LinkedIn messages"
+
+# Accept all pending connections
+koda agent -m "Accept all pending LinkedIn connection requests"
+
+# Get interesting posts
+koda agent -m "Show me interesting posts from my LinkedIn feed"
+
+# Create a post
+koda agent -m "Write and post a LinkedIn update about my new project"
+
+# Search for people
+koda agent -m "Find Python developers in Amsterdam on LinkedIn"
+```
+
+> **Note:** LinkedIn automation uses an unofficial API. Use responsibly and respect LinkedIn's terms of service.
+
+## � Contacts & Birthdays
 
 Koda accesses your macOS/iCloud contacts for:
 
@@ -757,6 +894,7 @@ Koda comes with a comprehensive set of tools:
 | `list_dir` | List directories |
 | `message` | Send messages via channels |
 | `spawn` | Spawn subagents |
+| `linkedin` | LinkedIn messages, connections, posts, search |
 
 ## 📝 License
 
