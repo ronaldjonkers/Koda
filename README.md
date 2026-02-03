@@ -357,6 +357,7 @@ Or configure manually:
     "exchange": {
       "enabled": true,
       "email": "you@company.com",
+      "username": "DOMAIN\\username",
       "password": "app-password",
       "server": "mail.company.com",
       "version": "2016",
@@ -365,6 +366,8 @@ Or configure manually:
   }
 }
 ```
+
+> **Note:** The `username` field is optional. Use it when your Exchange server requires a username different from your email address (e.g., `DOMAIN\\user` format for on-premises Exchange).
 
 Supported versions: `auto`, `2013`, `2016`, `2019`, `o365`
 

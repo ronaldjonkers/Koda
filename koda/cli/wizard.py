@@ -298,6 +298,12 @@ class SetupWizard:
         console.print("Create one at: https://account.microsoft.com/security\n")
         
         email = Prompt.ask("Email address")
+        
+        username = Prompt.ask(
+            "Username (leave empty if same as email, or enter DOMAIN\\\\user format)",
+            default=""
+        )
+        
         password = Prompt.ask("Password (or app password)", password=True)
         
         server = Prompt.ask(
@@ -313,13 +319,14 @@ class SetupWizard:
         
         self.config.integrations.exchange.enabled = True
         self.config.integrations.exchange.email = email
+        self.config.integrations.exchange.username = username
         self.config.integrations.exchange.password = password
         self.config.integrations.exchange.server = server
         self.config.integrations.exchange.version = version
         
         # Test connection
         console.print("Testing Exchange connection...", end=" ")
-        success, message = self._test_exchange(email, password, server, version)
+        success, message = self._test_exchange(email, username, password, server, version)
         
         if success:
             console.print(f"[green]✓[/green] {message}")
@@ -328,7 +335,7 @@ class SetupWizard:
             if Confirm.ask("Try again?"):
                 self._setup_exchange()
     
-    def _test_exchange(self, email: str, password: str, server: str, version: str) -> tuple[bool, str]:
+    def _test_exchange(self, email: str, username: str, password: str, server: str, version: str) -> tuple[bool, str]:
         """Test Exchange connection."""
         try:
             from exchangelib import Credentials, Account, Configuration, DELEGATE
@@ -344,7 +351,9 @@ class SetupWizard:
                 "auto": None
             }
             
-            credentials = Credentials(email, password)
+            # Use username if provided, otherwise use email
+            auth_user = username if username else email
+            credentials = Credentials(auth_user, password)
             
             if server:
                 config = Configuration(

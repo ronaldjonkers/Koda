@@ -130,6 +130,7 @@ class CalendarAccount(BaseModel):
     
     # Exchange-specific
     email: str = ""
+    username: str = ""  # Optional: if different from email (e.g., DOMAIN\\user)
     password: str = ""
     server: str = ""
     calendar_name: str = "Calendar"
@@ -139,7 +140,7 @@ class CalendarAccount(BaseModel):
     
     # CalDAV-specific
     url: str = ""
-    username: str = ""
+    # username is shared with Exchange
     # password is shared with Exchange
     calendar_path: str = ""
 
@@ -156,6 +157,7 @@ class EmailAccount(BaseModel):
     
     # Exchange-specific (shares with calendar)
     email: str = ""
+    username: str = ""  # Optional: if different from email
     password: str = ""
     server: str = ""
     
@@ -188,6 +190,7 @@ class ExchangeConfig(BaseModel):
     """
     enabled: bool = False
     email: str = ""
+    username: str = ""  # Optional: if different from email (e.g., DOMAIN\\user)
     password: str = ""
     server: str = ""  # e.g., "outlook.office365.com" or "mail.company.com"
     calendar_name: str = "Calendar"

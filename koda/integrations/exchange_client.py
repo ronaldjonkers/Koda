@@ -35,6 +35,7 @@ class ExchangeClient:
         email: str,
         password: str,
         server: str | None = None,
+        username: str | None = None,
         calendar_name: str = "Calendar",
         version: str = "auto",
         auth_type: str = "basic",
@@ -44,9 +45,10 @@ class ExchangeClient:
         Initialize Exchange client.
         
         Args:
-            email: Email address / username
+            email: Email address for the mailbox
             password: Password or app-specific password
             server: Exchange server URL (optional if autodiscover enabled)
+            username: Username for authentication (if different from email, e.g., DOMAIN\\user)
             calendar_name: Name of the calendar to use
             version: Exchange version (auto, 2013, 2016, 2019, o365)
             auth_type: Authentication type (basic, ntlm, oauth2)
@@ -55,6 +57,7 @@ class ExchangeClient:
         self.email = email
         self.password = password
         self.server = server
+        self.username = username or email  # Use email as username if not provided
         self.calendar_name = calendar_name
         self.version = version
         self.auth_type = auth_type
@@ -78,13 +81,14 @@ class ExchangeClient:
             )
         
         # Set up credentials based on auth type
+        # Use username for authentication (may be different from email, e.g., DOMAIN\\user)
         if self.auth_type == "ntlm":
             # NTLM authentication for on-premises Exchange
             from exchangelib import NTLM
-            credentials = Credentials(self.email, self.password)
+            credentials = Credentials(self.username, self.password)
         else:
             # Basic authentication
-            credentials = Credentials(self.email, self.password)
+            credentials = Credentials(self.username, self.password)
         
         # Determine version
         version_obj = None
