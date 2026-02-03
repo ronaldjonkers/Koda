@@ -1288,32 +1288,46 @@ class SetupWizard:
                 self._setup_whatsapp_contact_rules()
         
         else:
-            # Restricted mode - only specific numbers
-            allow_from = Prompt.ask(
-                "Allowed phone numbers (comma-separated, e.g., +31612345678)",
-                default=", ".join(self.config.channels.whatsapp.allow_from)
-            )
-            if allow_from:
-                self.config.channels.whatsapp.allow_from = [
-                    x.strip() for x in allow_from.split(",") if x.strip()
-                ]
-            
-            # Owner settings (also useful in restricted mode)
-            console.print("\n[bold]Owner Settings[/bold]")
-            console.print("[dim]Optional: Set your phone and name for escalations and greetings.[/dim]")
+            # Restricted mode - ask for own number first
+            console.print("\n[bold]Your WhatsApp Number[/bold]")
+            console.print("[dim]This is the phone number linked to WhatsApp that you'll use to chat with Koda.[/dim]")
+            console.print("[dim]Messages you send to yourself will also be processed.[/dim]\n")
             
             owner_phone = Prompt.ask(
-                "Your phone number (optional, for escalations)",
+                "Your phone number (e.g., +31612345678)",
                 default=self.config.channels.whatsapp.owner_phone
             )
             self.config.channels.whatsapp.owner_phone = owner_phone
             
+            owner_name = Prompt.ask(
+                "Your name",
+                default=self.config.channels.whatsapp.owner_name or self.config.assistant.user_name
+            )
+            self.config.channels.whatsapp.owner_name = owner_name
+            
+            # Build allow_from list - always include owner's phone
+            console.print("\n[bold]Additional Allowed Numbers[/bold]")
+            console.print("[dim]Your number is automatically allowed. Add others who can also chat with Koda.[/dim]")
+            
+            # Get existing allow_from without the owner phone
+            existing = [x for x in self.config.channels.whatsapp.allow_from 
+                       if x.replace("+", "").replace(" ", "") != owner_phone.replace("+", "").replace(" ", "")]
+            
+            additional = Prompt.ask(
+                "Additional phone numbers (comma-separated, or leave empty)",
+                default=", ".join(existing) if existing else ""
+            )
+            
+            # Build final allow_from list
+            allow_list = []
             if owner_phone:
-                owner_name = Prompt.ask(
-                    "Your name",
-                    default=self.config.channels.whatsapp.owner_name or self.config.assistant.user_name
-                )
-                self.config.channels.whatsapp.owner_name = owner_name
+                allow_list.append(owner_phone.strip())
+            if additional:
+                allow_list.extend([x.strip() for x in additional.split(",") if x.strip()])
+            
+            self.config.channels.whatsapp.allow_from = allow_list
+            
+            console.print(f"\n[dim]Allowed numbers: {', '.join(allow_list)}[/dim]")
         
         console.print("\n[green]✓[/green] WhatsApp configured")
         console.print("[yellow]![/yellow] Start the gateway with 'koda gateway' - WhatsApp bridge starts automatically")
