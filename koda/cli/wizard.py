@@ -183,7 +183,10 @@ class SetupWizard:
             password=True
         )
         
-        # Set the API key
+        # Model selection based on provider
+        model = self._select_model(provider)
+        
+        # Set the API key and model
         if provider == "openrouter":
             self.config.providers.openrouter.api_key = api_key
         elif provider == "anthropic":
@@ -195,50 +198,169 @@ class SetupWizard:
         elif provider == "groq":
             self.config.providers.groq.api_key = api_key
         
-        # Test the connection
-        console.print("Testing API connection...", end=" ")
-        success, message = self._test_llm_provider(provider, api_key)
+        # Set the default model
+        self.config.agent.model = model
+        
+        # Test the connection with a real prompt
+        console.print("\nTesting LLM connection...", end=" ")
+        success, message = self._test_llm_chat(provider, api_key, model)
         
         if success:
             console.print(f"[green]✓[/green] {message}")
+            console.print(f"\n[green]✓[/green] Provider configured: {provider}")
+            console.print(f"[green]✓[/green] Model: {model}")
         else:
             console.print(f"[red]✗[/red] {message}")
             if Confirm.ask("Try again?"):
                 self._setup_provider()
     
-    def _test_llm_provider(self, provider: str, api_key: str) -> tuple[bool, str]:
-        """Test LLM provider connection."""
+    def _select_model(self, provider: str) -> str:
+        """Select a model for the provider."""
+        console.print("\n[bold]Model Selection[/bold]")
+        console.print("[dim]Choose a model based on your needs and budget.[/dim]\n")
+        
+        if provider == "openrouter":
+            console.print("[bold]Popular OpenRouter Models:[/bold]")
+            console.print("  [cyan]anthropic/claude-sonnet-4-20250514[/cyan] - Best balance (recommended)")
+            console.print("  [cyan]anthropic/claude-opus-4-5[/cyan] - Most capable, expensive")
+            console.print("  [cyan]openai/gpt-4o[/cyan] - OpenAI's latest")
+            console.print("  [cyan]openai/gpt-4o-mini[/cyan] - Fast and cheap")
+            console.print("  [cyan]google/gemini-2.0-flash-001[/cyan] - Google's fast model")
+            console.print("  [cyan]meta-llama/llama-3.3-70b-instruct[/cyan] - Open source, good value")
+            console.print("  [cyan]deepseek/deepseek-chat[/cyan] - Very cheap, good quality\n")
+            
+            model = Prompt.ask(
+                "Model name",
+                default="anthropic/claude-sonnet-4-20250514"
+            )
+        elif provider == "anthropic":
+            console.print("[bold]Anthropic Models:[/bold]")
+            console.print("  [cyan]claude-sonnet-4-20250514[/cyan] - Best balance (recommended)")
+            console.print("  [cyan]claude-opus-4-5[/cyan] - Most capable")
+            console.print("  [cyan]claude-3-5-haiku-20241022[/cyan] - Fast and cheap\n")
+            
+            model = Prompt.ask(
+                "Model name",
+                default="claude-sonnet-4-20250514"
+            )
+        elif provider == "openai":
+            console.print("[bold]OpenAI Models:[/bold]")
+            console.print("  [cyan]gpt-4o[/cyan] - Latest and best (recommended)")
+            console.print("  [cyan]gpt-4o-mini[/cyan] - Fast and cheap")
+            console.print("  [cyan]gpt-4-turbo[/cyan] - Previous generation\n")
+            
+            model = Prompt.ask(
+                "Model name",
+                default="gpt-4o"
+            )
+        elif provider == "gemini":
+            console.print("[bold]Google Gemini Models:[/bold]")
+            console.print("  [cyan]gemini-2.0-flash[/cyan] - Fast (recommended)")
+            console.print("  [cyan]gemini-1.5-pro[/cyan] - More capable")
+            console.print("  [cyan]gemini-1.5-flash[/cyan] - Previous fast model\n")
+            
+            model = Prompt.ask(
+                "Model name",
+                default="gemini-2.0-flash"
+            )
+        elif provider == "groq":
+            console.print("[bold]Groq Models (very fast inference):[/bold]")
+            console.print("  [cyan]llama-3.3-70b-versatile[/cyan] - Best quality (recommended)")
+            console.print("  [cyan]llama-3.1-8b-instant[/cyan] - Fastest")
+            console.print("  [cyan]mixtral-8x7b-32768[/cyan] - Good balance\n")
+            
+            model = Prompt.ask(
+                "Model name",
+                default="llama-3.3-70b-versatile"
+            )
+        else:
+            model = "gpt-4o"
+        
+        return model
+    
+    def _test_llm_chat(self, provider: str, api_key: str, model: str) -> tuple[bool, str]:
+        """Test LLM with an actual chat request."""
         try:
             import httpx
             
+            test_message = "Say 'Hello! Koda is ready.' and nothing else."
+            
             if provider == "openrouter":
-                url = "https://openrouter.ai/api/v1/models"
-                headers = {"Authorization": f"Bearer {api_key}"}
+                url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": test_message}],
+                    "max_tokens": 20
+                }
             elif provider == "anthropic":
                 url = "https://api.anthropic.com/v1/messages"
-                headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-                # Just check auth, don't actually send
-                return True, "API key format valid (full test requires usage)"
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": test_message}],
+                    "max_tokens": 20
+                }
             elif provider == "openai":
-                url = "https://api.openai.com/v1/models"
-                headers = {"Authorization": f"Bearer {api_key}"}
+                url = "https://api.openai.com/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": test_message}],
+                    "max_tokens": 20
+                }
             elif provider == "gemini":
-                url = f"https://generativelanguage.googleapis.com/v1/models?key={api_key}"
-                headers = {}
+                url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={api_key}"
+                headers = {"Content-Type": "application/json"}
+                data = {
+                    "contents": [{"parts": [{"text": test_message}]}]
+                }
             elif provider == "groq":
-                url = "https://api.groq.com/openai/v1/models"
-                headers = {"Authorization": f"Bearer {api_key}"}
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": test_message}],
+                    "max_tokens": 20
+                }
             else:
                 return False, "Unknown provider"
             
-            response = httpx.get(url, headers=headers, timeout=10)
+            response = httpx.post(url, headers=headers, json=data, timeout=30)
             
             if response.status_code == 200:
-                return True, "Connection successful"
+                result = response.json()
+                # Extract response text based on provider
+                if provider == "anthropic":
+                    text = result.get("content", [{}])[0].get("text", "")
+                elif provider == "gemini":
+                    text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                else:
+                    text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                
+                if text:
+                    return True, f"LLM responded: '{text.strip()[:50]}'"
+                return True, "LLM connected successfully"
             elif response.status_code == 401:
                 return False, "Invalid API key"
+            elif response.status_code == 404:
+                return False, f"Model '{model}' not found"
             else:
-                return False, f"HTTP {response.status_code}"
+                error = response.json().get("error", {}).get("message", response.text[:100])
+                return False, f"Error: {error}"
         
         except Exception as e:
             return False, f"Connection error: {str(e)}"

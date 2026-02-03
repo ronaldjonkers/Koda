@@ -239,7 +239,51 @@ Koda works with any LLM provider that supports the OpenAI API format.
 | `ollama` | Local models via Ollama | Self-hosted |
 | `lmstudio` | Local models via LM Studio | Self-hosted |
 
-### Basic Configuration
+### Setup Wizard
+
+The setup wizard guides you through provider and model selection:
+
+```bash
+koda config provider
+```
+
+**Example flow:**
+```
+AI Provider Configuration
+
+Select provider [openrouter/anthropic/openai/gemini/groq] (openrouter): openrouter
+Enter your openrouter API key: ********
+
+Model Selection
+Choose a model based on your needs and budget.
+
+Popular OpenRouter Models:
+  anthropic/claude-sonnet-4-20250514 - Best balance (recommended)
+  anthropic/claude-opus-4-5 - Most capable, expensive
+  openai/gpt-4o - OpenAI's latest
+  deepseek/deepseek-chat - Very cheap, good quality
+
+Model name (anthropic/claude-sonnet-4-20250514): 
+
+Testing LLM connection... ✓ LLM responded: 'Hello! Koda is ready.'
+
+✓ Provider configured: openrouter
+✓ Model: anthropic/claude-sonnet-4-20250514
+```
+
+### Recommended Models by Provider
+
+| Provider | Model | Cost | Use Case |
+|----------|-------|------|----------|
+| OpenRouter | `anthropic/claude-sonnet-4-20250514` | $$ | Best balance |
+| OpenRouter | `deepseek/deepseek-chat` | $ | Budget-friendly |
+| OpenRouter | `anthropic/claude-opus-4-5` | $$$$ | Most capable |
+| Anthropic | `claude-sonnet-4-20250514` | $$ | Direct Claude |
+| OpenAI | `gpt-4o` | $$$ | Latest GPT |
+| OpenAI | `gpt-4o-mini` | $ | Fast & cheap |
+| Groq | `llama-3.3-70b-versatile` | $ | Very fast |
+
+### Manual Configuration
 
 ```json
 {
@@ -248,10 +292,8 @@ Koda works with any LLM provider that supports the OpenAI API format.
       "apiKey": "sk-or-v1-xxx"
     }
   },
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-sonnet-4-20250514"
-    }
+  "agent": {
+    "model": "anthropic/claude-sonnet-4-20250514"
   }
 }
 ```
