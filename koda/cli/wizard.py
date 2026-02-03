@@ -414,9 +414,10 @@ class SetupWizard:
         account.username = username or email
         account.password = password
         account.server = server
+        account.version = "auto"
         
         console.print("Testing connection...", end=" ")
-        success, message = self._test_exchange(email, password, server, username)
+        success, message = self._test_exchange(email, username or email, password, server, "auto")
         
         if success:
             console.print(f"[green]✓[/green] {message}")
@@ -916,7 +917,7 @@ class SetupWizard:
         account.server = server
         
         console.print("Testing connection...", end=" ")
-        success, message = self._test_exchange(email, password, server, username)
+        success, message = self._test_exchange(email, username or email, password, server, "auto")
         
         if success:
             console.print(f"[green]✓[/green] {message}")

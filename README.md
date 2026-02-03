@@ -169,6 +169,59 @@ koda config --test
 koda agent -m "What's on my calendar today?"
 ```
 
+## 🛠️ CLI Commands
+
+### Main Commands
+
+| Command | Description |
+|---------|-------------|
+| `koda onboard` | Run interactive setup wizard |
+| `koda gateway` | Start the main Koda service (messaging, cron, webhooks) |
+| `koda agent -m "..."` | Chat with the AI assistant |
+| `koda config [section]` | Configure a specific section (assistant, provider, calendar, email, whatsapp, telegram) |
+| `koda status` | Show current configuration and connection status |
+| `koda setup-proxy` | Generate reverse proxy config for external access |
+
+### Configuration Sections
+
+```bash
+koda config assistant    # Name, personality, language
+koda config provider     # LLM provider and API key
+koda config calendar     # Google, Exchange, CalDAV, iCloud calendars
+koda config email        # Gmail, Exchange, IMAP email accounts
+koda config whatsapp     # WhatsApp bot configuration
+koda config telegram     # Telegram bot configuration
+koda config webhook      # Webhook API settings
+koda config --show       # Show current configuration
+koda config --test       # Test all connections
+```
+
+### Cron Scheduler
+
+```bash
+koda cron list           # List all scheduled jobs
+koda cron add            # Add a new scheduled job
+koda cron remove <id>    # Remove a job
+koda cron enable <id>    # Enable/disable a job
+koda cron run <id>       # Manually run a job
+```
+
+### Channels (WhatsApp/Telegram)
+
+```bash
+koda channels status     # Show channel connection status
+koda channels login      # Link WhatsApp via QR code
+```
+
+### Gateway Options
+
+```bash
+koda gateway                    # Start with defaults
+koda gateway --verbose          # Enable debug logging
+koda gateway --no-bridge        # Don't auto-start WhatsApp bridge
+koda gateway --port 18790       # Custom port
+```
+
 ## 🤖 LLM Providers
 
 Koda works with any LLM provider that supports the OpenAI API format.
