@@ -609,7 +609,9 @@ def gateway(
             "user_name": config.assistant.user_name,
             "language": config.assistant.language,
             "personality": config.assistant.personality,
-        }
+        },
+        # Pass full config for UnifiedEmailTool
+        "config": config
     }
     
     # Create agent (reminder_service will be set after it's created)

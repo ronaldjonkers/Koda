@@ -104,76 +104,73 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // Handle incoming messages
+    // Handle incoming messages - PROCESS ALL EVENTS
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      console.log(`📨 messages.upsert event: type=${type}, count=${messages.length}`);
+      console.log(`\n📨 ===== NEW MESSAGE EVENT =====`);
+      console.log(`Type: ${type}, Count: ${messages.length}`);
       
-      // Debug: Log ALL message types to understand what's happening
-      for (const msg of messages) {
-        console.log(`   [DEBUG] Message details:`);
-        console.log(`   - type: ${type}`);
-        console.log(`   - remoteJid: ${msg.key.remoteJid}`);
-        console.log(`   - fromMe: ${msg.key.fromMe}`);
-        console.log(`   - participant: ${msg.key.participant || 'none'}`);
-        console.log(`   - id: ${msg.key.id}`);
-        
-        // Special handling for "Yourself" chat
-        // In WhatsApp, messages to yourself might have your own JID as remoteJid
-        const myJid = this.sock.user?.id;
-        console.log(`   - My JID: ${myJid}`);
-        
-        // Check if this is a self-message
-        const isSelfChat = msg.key.remoteJid === myJid;
-        console.log(`   - Is self-chat: ${isSelfChat}`);
-      }
+      // Get my own phone number for self-message detection
+      const myJid = this.sock.user?.id;
+      const myPhone = myJid ? myJid.split('@')[0] : null;
+      console.log(`My JID: ${myJid}`);
+      console.log(`My Phone: ${myPhone}`);
       
-      // Process all message types - don't filter by type
-      // This ensures we catch all self-messages regardless of type
-      console.log(`   Processing all ${messages.length} messages...`);
-
       for (const msg of messages) {
+        console.log(`\n--- Message ${msg.key.id} ---`);
+        console.log(`remoteJid: ${msg.key.remoteJid}`);
+        console.log(`fromMe: ${msg.key.fromMe}`);
+        console.log(`participant: ${msg.key.participant || 'none'}`);
+        
         const sender = msg.key.remoteJid || 'unknown';
-        const fromMe = msg.key.fromMe || false;
+        const senderPhone = sender.split('@')[0];
         
         // Skip status updates
-        if (msg.key.remoteJid === 'status@broadcast') {
-          console.log(`   Skipping: status broadcast`);
+        if (sender === 'status@broadcast') {
+          console.log(`Skipping: status broadcast`);
           continue;
         }
-
+        
+        // CRITICAL FIX: Check for self-messages
+        // Self-messages can appear in multiple ways:
+        // 1. fromMe=true and remoteJid is your own number (Yourself chat)
+        // 2. fromMe=true in a personal chat
+        const isSelfMessage = (
+          msg.key.fromMe && 
+          (senderPhone === myPhone || sender === myJid)
+        );
+        
+        console.log(`senderPhone: ${senderPhone}, myPhone: ${myPhone}`);
+        console.log(`Is self-message: ${isSelfMessage}`);
+        
         const content = this.extractMessageContent(msg);
         if (!content) {
-          console.log(`   Skipping: no extractable content for ${sender}`);
+          console.log(`Skipping: no content`);
           continue;
         }
         
-        console.log(`   Content from ${sender}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
-
-        const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
+        console.log(`Content: "${content.substring(0, 100)}..."`);
         
-        // Get my own JID for self-message detection
-        const myJid = this.sock.user?.id;
-        const isSelfChat = msg.key.remoteJid === myJid;
+        const isGroup = sender.endsWith('@g.us');
         
-        // For self-messages, we need to forward them with the correct sender
-        let messageSender = sender;
-        
-        if (isSelfChat || (fromMe && !isGroup)) {
-          console.log(`   📱 SELF-MESSAGE DETECTED! remoteJid=${sender}, myJid=${myJid}`);
-          // For self-messages, the sender should be our own number
-          messageSender = myJid || sender;
+        // ALWAYS forward messages - let Python decide what to do
+        // For self-messages, use the phone number directly
+        let finalSender = sender;
+        if (isSelfMessage && myPhone) {
+          finalSender = `${myPhone}@s.whatsapp.net`;
+          console.log(`🔄 Self-message detected! Using sender: ${finalSender}`);
         }
-
-        console.log(`✅ Forwarding message to Python: sender=${messageSender}, fromMe=${fromMe}, isSelfChat=${isSelfChat}`);
+        
+        console.log(`✅ Forwarding to Python: ${finalSender}`);
         
         this.options.onMessage({
           id: msg.key.id || '',
-          sender: messageSender,
+          sender: finalSender,
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,
         });
       }
+      console.log(`===== END MESSAGE EVENT =====\n`);
     });
   }
 

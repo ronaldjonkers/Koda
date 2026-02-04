@@ -20,6 +20,7 @@ from koda.core.tools.spawn import SpawnTool
 from koda.core.tools.calendar import GoogleCalendarTool, ExchangeCalendarTool
 from koda.core.tools.unified_calendar import UnifiedCalendarTool
 from koda.core.tools.email import GmailTool, ExchangeEmailTool
+from koda.core.tools.unified_email import UnifiedEmailTool
 from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
 from koda.core.tools.script import ScriptTool
@@ -133,6 +134,9 @@ class AgentLoop:
         # Email tools
         self.tools.register(GmailTool())
         self.tools.register(ExchangeEmailTool())
+        
+        # Unified email tool for email_accounts configuration
+        self.tools.register(UnifiedEmailTool(config=calendar_config.get('config')))
         
         # Contacts tool
         self.tools.register(ContactsTool())

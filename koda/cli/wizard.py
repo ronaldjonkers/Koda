@@ -1785,12 +1785,18 @@ class SetupWizard:
         
         # Calendar
         cal_status = []
+        # Check new calendar_accounts list
+        for account in self.config.integrations.calendar_accounts:
+            if account.enabled:
+                cal_status.append(f"{account.name} ({account.type})")
+        
+        # Also check legacy configs
         if self.config.integrations.google.enabled:
-            cal_status.append("Google")
+            cal_status.append("Google (legacy)")
         if self.config.integrations.exchange.enabled:
-            cal_status.append("Exchange")
+            cal_status.append("Exchange (legacy)")
         if self.config.integrations.caldav.enabled:
-            cal_status.append("CalDAV")
+            cal_status.append("CalDAV (legacy)")
         
         if cal_status:
             table.add_row("Calendar", "[green]✓[/green]", ", ".join(cal_status))
@@ -1799,12 +1805,18 @@ class SetupWizard:
         
         # Email
         email_status = []
+        # Check new email_accounts list
+        for account in self.config.integrations.email_accounts:
+            if account.enabled:
+                email_status.append(f"{account.name} ({account.type})")
+        
+        # Also check legacy configs
         if self.config.integrations.google.enabled:
-            email_status.append("Gmail")
+            email_status.append("Gmail (legacy)")
         if self.config.integrations.exchange.enabled:
-            email_status.append("Exchange")
+            email_status.append("Exchange (legacy)")
         if self.config.integrations.imap.enabled:
-            email_status.append("IMAP")
+            email_status.append("IMAP (legacy)")
         
         if email_status:
             table.add_row("Email", "[green]✓[/green]", ", ".join(email_status))
