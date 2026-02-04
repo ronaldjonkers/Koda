@@ -9,6 +9,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  jidDecode,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
@@ -118,7 +119,7 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // Handle incoming messages - using exact Baileys pattern for self-messages
+    // Handle incoming messages - using jidDecode for robust self-message detection
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
@@ -126,57 +127,69 @@ export class WhatsAppClient {
       console.log(`\n🔔 messages.upsert EVENT FIRED!`);
       console.log(`   Type: ${type}`);
       console.log(`   Message count: ${messages?.length || 0}`);
-      console.log(`   Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 500));
+      console.log(`   Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 1500));
       
-      // CRITICAL: Type 'append' is often used for self-messages
-      // WhatsApp treats self-messages as sync actions, not regular incoming messages
-      if (type !== 'notify' && type !== 'append') {
-        console.log(`   ↳ Skipping: type "${type}" not notify/append`);
-        return;
-      }
+      // Accept ALL types for now to debug - don't filter yet
+      // if (type !== 'notify' && type !== 'append') {
+      //   console.log(`   ↳ Skipping: type "${type}" not notify/append`);
+      //   return;
+      // }
+      
+      // Use jidDecode for robust JID extraction
+      const me = jidDecode(this.sock.user?.id)?.user;
+      const myJid = me ? `${me}@s.whatsapp.net` : null;
+      console.log(`   My decoded JID: ${myJid} (from sock.user.id: ${this.sock.user?.id})`);
       
       for (const msg of messages) {
-        const jid = msg.key?.remoteJid;
-        if (!jid) continue;
+        const remoteJid = msg.key?.remoteJid;
+        if (!remoteJid) {
+          console.log(`   ↳ Message has no remoteJid, skipping`);
+          continue;
+        }
         
         // Skip status updates and broadcasts
-        if (jid.endsWith('@status') || jid.endsWith('@broadcast')) {
+        if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) {
+          console.log(`   ↳ Skipping status/broadcast: ${remoteJid}`);
           continue;
         }
         
         const isMe = Boolean(msg.key?.fromMe);
-        const isGroup = jid.endsWith('@g.us');
+        const isGroup = remoteJid.endsWith('@g.us');
         
-        // Determine if this is the 'Message Yourself' chat
-        // In this chat, the JID equals your own number
-        // sock.user.id format: "31614254251:123@s.whatsapp.net" -> extract "31614254251"
-        const myNumber = this.sock.user?.id?.split(':')[0];
-        const myJid = myNumber ? `${myNumber}@s.whatsapp.net` : null;
-        const isMessageToSelf = !isGroup && jid === myJid;
+        // Use jidDecode for the remote JID too
+        const decodedRemote = jidDecode(remoteJid);
+        const decodedRemoteJid = decodedRemote?.user ? `${decodedRemote.user}@s.whatsapp.net` : null;
         
-        // Log for debugging
-        console.log(`📨 Message: jid=${jid}, myJid=${myJid}, fromMe=${isMe}, isMessageToSelf=${isMessageToSelf}, type=${type}`);
-        
-        if (isMe && !isMessageToSelf) {
-          // This is a message YOU sent to SOMEONE ELSE
-          // Skip to prevent loops
-          console.log(`   ↳ Skipping: outbound message to others`);
-          continue;
-        }
-        
-        // If we get here, it's either:
-        // - A message FROM someone else (isMe=false)
-        // - A message you sent TO YOURSELF (isMe=true && isMessageToSelf=true)
+        // Check for BOTH: the special "me" JID AND matching phone number
+        const isMessageToSelf = remoteJid === 'me' || (!isGroup && decodedRemoteJid === myJid);
         
         const content = this.extractMessageContent(msg);
+        
+        // Log EVERY message - including outgoing - for debugging
+        console.log(`📨 Message details:`);
+        console.log(`   remoteJid: ${remoteJid}`);
+        console.log(`   decodedRemoteJid: ${decodedRemoteJid}`);
+        console.log(`   myJid: ${myJid}`);
+        console.log(`   fromMe: ${isMe}`);
+        console.log(`   isGroup: ${isGroup}`);
+        console.log(`   isMessageToSelf: ${isMessageToSelf}`);
+        console.log(`   type: ${type}`);
+        console.log(`   content: ${content ? `"${content.substring(0, 50)}..."` : '(none)'}`);
+        
+        // For now, DON'T skip outgoing messages - log them all
+        if (isMe && !isMessageToSelf) {
+          console.log(`   ⚠️ This is an OUTGOING message to someone else (would normally skip)`);
+          // continue; // Commented out for debugging
+        }
+        
         if (!content) {
-          console.log(`   ↳ Skipping: no text content`);
+          console.log(`   ↳ No text content to process`);
           continue;
         }
         
-        const sender = isMessageToSelf && myJid ? myJid : jid;
+        const sender = isMessageToSelf && myJid ? myJid : remoteJid;
         
-        console.log(`✅ Processing: from=${sender}, content="${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`);
+        console.log(`✅ Processing: from=${sender}`);
         
         this.options.onMessage({
           id: msg.key.id || '',
