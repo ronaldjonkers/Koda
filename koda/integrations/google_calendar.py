@@ -1,9 +1,10 @@
 """Google Calendar integration client."""
+from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -17,7 +18,7 @@ class GoogleCalendarClient:
         self,
         credentials_file: str = "~/.koda/google_credentials.json",
         token_file: str = "~/.koda/google_token.json",
-        calendar_ids: list[str] | None = None
+        calendar_ids: Optional[list[str]] = None
     ):
         self.credentials_file = Path(credentials_file).expanduser()
         self.token_file = Path(token_file).expanduser()

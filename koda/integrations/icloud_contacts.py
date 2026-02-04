@@ -1,9 +1,11 @@
 """iCloud Contacts integration client."""
 
+from __future__ import annotations
+
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 

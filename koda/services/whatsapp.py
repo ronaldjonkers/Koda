@@ -271,6 +271,10 @@ class WhatsAppChannel(BaseChannel):
 /schedules - Show all scheduled tasks
 /delschedule <id> - Delete a scheduled task
 
+*Google Workspace (volledig):*
+/googlestatus - Show Google connection status
+/setupgoogle - Get setup instructions for full Google access
+
 *Google Calendar (eenvoudig):*
 /addgoogle <email> <app_password> - Add Google Calendar via App Password
 /googlehelp - Setup instructions for Google Calendar
@@ -407,6 +411,12 @@ Example: `/addbrave BSA1234567890abcdef`"""
             if len(parts) < 2:
                 return "❌ Both email and app_password required.\n\nUsage: `/addgoogle <email> <app_password>`"
             return self._add_google_calendar(parts[0], parts[1])
+        
+        elif command == "/googlestatus":
+            return self._google_workspace_status()
+        
+        elif command == "/setupgoogle":
+            return self._google_workspace_setup_help()
         
         return None  # Not a recognized command
     
@@ -718,6 +728,99 @@ _Tip: Je kunt meerdere Google accounts toevoegen!_"""
         except Exception as e:
             logger.error(f"Error adding Google Calendar: {e}")
             return f"❌ Error: {e}\n\nGebruik /googlehelp voor setup instructies."
+    
+    def _google_workspace_status(self) -> str:
+        """Get Google Workspace connection status."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            
+            if status["authorized"]:
+                calendars = client.list_calendars()
+                cal_list = "\n".join([f"  • {c.name}" + (" (primary)" if c.is_primary else "") for c in calendars[:10]])
+                
+                return f"""✅ *Google Workspace Connected*
+
+📧 Account: {status['email']}
+📅 Calendars: {len(calendars)}
+
+{cal_list}
+
+*Beschikbare features:*
+• Gmail lezen en versturen
+• Calendar events (incl. shared calendars)
+• Google Meet links aanmaken
+
+_Gebruik /setupgoogle voor re-authorization_"""
+            
+            elif status["configured"]:
+                return """⚠️ *Google Workspace: Not Authorized*
+
+Credentials bestand gevonden, maar nog niet geauthoriseerd.
+
+Run in terminal:
+`koda setup-google`
+
+Of open het dashboard:
+`http://localhost:8081` → Google tab"""
+            
+            else:
+                return """❌ *Google Workspace: Not Configured*
+
+Voor volledige Google integratie (Gmail + Calendar + Meet):
+
+1. Maak een Google Cloud Project
+2. Download credentials.json naar ~/.koda/
+3. Run: `koda setup-google`
+
+_Of gebruik /googlehelp voor eenvoudige Calendar-only setup_"""
+                
+        except ImportError:
+            return "❌ Google API libraries niet geïnstalleerd.\nRun: pip install google-api-python-client google-auth-oauthlib"
+        except Exception as e:
+            logger.error(f"Error getting Google status: {e}")
+            return f"❌ Error: {e}"
+    
+    def _google_workspace_setup_help(self) -> str:
+        """Return Google Workspace setup instructions."""
+        return """🔧 *Google Workspace Setup (Volledig)*
+
+Deze methode geeft toegang tot Gmail, Calendar (incl. shared), en Meet links.
+
+*Stap 1: Google Cloud Project*
+1. Ga naar: console.cloud.google.com
+2. Maak een project genaamd "Koda"
+3. Ga naar "APIs & Services" → "Library"
+4. Enable: Gmail API, Google Calendar API
+
+*Stap 2: OAuth Consent Screen*
+1. Ga naar "APIs & Services" → "OAuth consent screen"
+2. Kies "External"
+3. Vul app name "Koda" in
+4. Voeg je email toe als test user
+
+*Stap 3: Credentials*
+1. Ga naar "APIs & Services" → "Credentials"
+2. Klik "Create Credentials" → "OAuth client ID"
+3. Type: "Desktop app"
+4. Download de JSON
+5. Hernoem naar `google_credentials.json`
+6. Zet in `~/.koda/google_credentials.json`
+
+*Stap 4: Authoriseren*
+Run in terminal:
+```
+koda setup-google
+```
+
+Of open het dashboard en ga naar de Google tab.
+
+📖 *Uitgebreide handleiding:*
+https://developers.google.com/calendar/api/quickstart/python
+
+_Voor alleen Calendar zonder OAuth, gebruik /googlehelp_"""
     
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""

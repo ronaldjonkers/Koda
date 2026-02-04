@@ -1,10 +1,11 @@
 """Gmail integration client."""
+from __future__ import annotations
 
 import base64
 from email.mime.text import MIMEText
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 

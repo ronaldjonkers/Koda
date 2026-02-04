@@ -564,6 +564,105 @@ Vul je Gmail adres en het 16-letter App Wachtwoord in het formulier hieronder in
 """
         }
     
+    @app.get("/api/google-workspace/status")
+    async def google_workspace_status():
+        """Get Google Workspace connection status."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            
+            if status["authorized"]:
+                try:
+                    calendars = client.list_calendars()
+                    status["calendars"] = [{"id": c.id, "name": c.name, "primary": c.is_primary} for c in calendars]
+                except:
+                    status["calendars"] = []
+            
+            return status
+        except ImportError:
+            return {"configured": False, "authorized": False, "error": "Google API libraries not installed"}
+        except Exception as e:
+            return {"configured": False, "authorized": False, "error": str(e)}
+    
+    @app.get("/api/google-workspace/auth-url")
+    async def google_workspace_auth_url(request: Request):
+        """Get Google OAuth authorization URL."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            
+            # Get the base URL for redirect
+            host = request.headers.get("host", "localhost:8081")
+            scheme = request.headers.get("x-forwarded-proto", "http")
+            redirect_uri = f"{scheme}://{host}/api/google-workspace/callback"
+            
+            client = GoogleWorkspaceClient()
+            
+            if not client.is_configured:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Google credentials not configured. Download google_credentials.json to ~/.koda/"
+                )
+            
+            auth_url = client.get_authorization_url(redirect_uri)
+            return {"auth_url": auth_url, "redirect_uri": redirect_uri}
+        except HTTPException:
+            raise
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/google-workspace/callback")
+    async def google_workspace_callback(code: str = None, error: str = None):
+        """Handle OAuth callback from Google."""
+        from fastapi.responses import RedirectResponse
+        
+        if error:
+            return RedirectResponse(url=f"/?google_error={error}")
+        
+        if not code:
+            return RedirectResponse(url="/?google_error=no_code")
+        
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            
+            # Use same redirect URI as auth-url
+            client = GoogleWorkspaceClient()
+            # Note: redirect_uri must match exactly what was used in get_authorization_url
+            # This is tricky in a callback, so we use a fixed localhost URL
+            redirect_uri = "http://localhost:8081/api/google-workspace/callback"
+            
+            if client.authorize_with_code(code, redirect_uri):
+                return RedirectResponse(url="/?google_success=true")
+            else:
+                return RedirectResponse(url="/?google_error=auth_failed")
+        except Exception as e:
+            logger.error(f"Google OAuth callback error: {e}")
+            return RedirectResponse(url=f"/?google_error={str(e)}")
+    
+    @app.post("/api/google-workspace/test")
+    async def google_workspace_test():
+        """Test Google Workspace connection."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            success, message = client.test_connection()
+            
+            if success:
+                calendars = client.list_calendars()
+                return {
+                    "status": "ok",
+                    "message": message,
+                    "calendars": [{"id": c.id, "name": c.name, "primary": c.is_primary, "role": c.access_role} for c in calendars]
+                }
+            else:
+                raise HTTPException(status_code=400, detail=message)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
     # ============== Web UI ==============
     
     @app.get("/", response_class=HTMLResponse)
@@ -963,24 +1062,62 @@ def get_dashboard_html() -> str:
             </div>
         </div>
 
-        <!-- Google Calendar Tab -->
+        <!-- Google Workspace Tab -->
         <div id="tab-google" class="tab-content hidden">
-            <div class="card">
-                <h2 class="text-lg font-semibold mb-4">📅 Google Calendar Setup (Easy Mode)</h2>
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <p class="text-sm text-blue-800"><strong>📖 Help:</strong> <a href="https://support.google.com/mail/answer/185833" target="_blank" class="underline">How to create App Passwords</a></p>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Google Workspace Status -->
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">� Google Workspace Status</h2>
+                    <div id="google-ws-status" class="space-y-3">
+                        <p class="text-gray-500">Loading...</p>
+                    </div>
                 </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Gmail Address</label>
-                        <input id="google-email" type="email" class="input" placeholder="your.email@gmail.com">
+                
+                <!-- Google Workspace Setup (OAuth) -->
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">🔐 Google Workspace Setup (Recommended)</h2>
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-green-800"><strong>✨ Volledige toegang:</strong> Gmail, Calendar (incl. shared), Meet links</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">App Password (16 letters)</label>
-                        <input id="google-password" type="password" class="input" placeholder="abcd efgh ijkl mnop">
+                    <div class="space-y-4">
+                        <p class="text-sm text-gray-600">Verbind je Google account via OAuth voor volledige toegang tot Gmail, Calendar en Meet.</p>
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm">
+                            <strong>Vereist:</strong> google_credentials.json in ~/.koda/<br>
+                            <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-600 underline">Google Cloud Console</a> → APIs & Services → Credentials
+                        </div>
+                        <button onclick="connectGoogleWorkspace()" class="btn btn-primary w-full">🔗 Connect Google Workspace</button>
+                        <button onclick="testGoogleWorkspace()" class="btn btn-secondary w-full">🧪 Test Connection</button>
+                        <p id="google-ws-connect-status" class="text-sm"></p>
                     </div>
-                    <button onclick="addGoogleCalendar()" class="btn btn-primary">Connect Google Calendar</button>
-                    <p id="google-status" class="text-sm"></p>
+                </div>
+                
+                <!-- Google CalDAV (Simple) -->
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">📅 Google Calendar (Simple Mode)</h2>
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-blue-800"><strong>📖 Alleen Calendar:</strong> Gebruikt App Password, geen OAuth nodig</p>
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Gmail Address</label>
+                            <input id="google-email" type="email" class="input" placeholder="your.email@gmail.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">App Password (16 letters)</label>
+                            <input id="google-password" type="password" class="input" placeholder="abcd efgh ijkl mnop">
+                            <p class="text-xs text-gray-500 mt-1"><a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-blue-600 underline">Get App Password</a></p>
+                        </div>
+                        <button onclick="addGoogleCalendar()" class="btn btn-secondary w-full">Connect Calendar Only</button>
+                        <p id="google-status" class="text-sm"></p>
+                    </div>
+                </div>
+                
+                <!-- Calendars List -->
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">📆 Connected Calendars</h2>
+                    <div id="google-calendars-list" class="space-y-2">
+                        <p class="text-gray-500">Connect Google Workspace to see calendars</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1233,6 +1370,7 @@ def get_dashboard_html() -> str:
             if (name === 'accounts') loadAccounts();
             if (name === 'schedules') loadSchedules();
             if (name === 'integrations') loadConfig();
+            if (name === 'google') loadGoogleWorkspaceStatus();
         }
 
         async function loadSystemMetrics() {
@@ -1315,6 +1453,109 @@ def get_dashboard_html() -> str:
             const type = document.getElementById('acc-type').value;
             const serverField = document.getElementById('acc-server-field');
             serverField.style.display = type === 'exchange' ? 'block' : 'none';
+        }
+
+        // Google Workspace functions
+        async function loadGoogleWorkspaceStatus() {
+            try {
+                const res = await fetch('/api/google-workspace/status');
+                const data = await res.json();
+                const statusDiv = document.getElementById('google-ws-status');
+                const calendarsList = document.getElementById('google-calendars-list');
+                
+                if (data.authorized) {
+                    statusDiv.innerHTML = `
+                        <div class="flex items-center space-x-2">
+                            <span class="badge badge-green">Connected</span>
+                            <span class="text-sm text-gray-600">${data.email || ''}</span>
+                        </div>
+                        <p class="text-sm text-gray-500">${data.calendars?.length || 0} calendars available</p>
+                    `;
+                    
+                    if (data.calendars?.length) {
+                        calendarsList.innerHTML = data.calendars.map(c => `
+                            <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                <span>${c.name}</span>
+                                ${c.primary ? '<span class="badge badge-blue text-xs">Primary</span>' : ''}
+                            </div>
+                        `).join('');
+                    }
+                } else if (data.configured) {
+                    statusDiv.innerHTML = `
+                        <div class="flex items-center space-x-2">
+                            <span class="badge badge-yellow">Not Authorized</span>
+                        </div>
+                        <p class="text-sm text-gray-500">Credentials file found. Click "Connect" to authorize.</p>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="flex items-center space-x-2">
+                            <span class="badge badge-red">Not Configured</span>
+                        </div>
+                        <p class="text-sm text-gray-500">Download google_credentials.json to ~/.koda/</p>
+                        ${data.error ? '<p class="text-xs text-red-500">' + data.error + '</p>' : ''}
+                    `;
+                }
+            } catch (e) {
+                console.error('Failed to load Google status:', e);
+            }
+        }
+
+        async function connectGoogleWorkspace() {
+            const status = document.getElementById('google-ws-connect-status');
+            status.textContent = '⏳ Getting authorization URL...';
+            status.className = 'text-sm text-blue-600';
+            
+            try {
+                const res = await fetch('/api/google-workspace/auth-url');
+                const data = await res.json();
+                
+                if (res.ok && data.auth_url) {
+                    status.textContent = '🔗 Opening Google login...';
+                    window.open(data.auth_url, '_blank');
+                    status.innerHTML = '⏳ Waiting for authorization... <a href="' + data.auth_url + '" target="_blank" class="text-blue-600 underline">Click here if popup blocked</a>';
+                } else {
+                    status.textContent = '❌ ' + (data.detail || 'Failed to get auth URL');
+                    status.className = 'text-sm text-red-600';
+                }
+            } catch (e) {
+                status.textContent = '❌ Error: ' + e.message;
+                status.className = 'text-sm text-red-600';
+            }
+        }
+
+        async function testGoogleWorkspace() {
+            const status = document.getElementById('google-ws-connect-status');
+            status.textContent = '⏳ Testing connection...';
+            status.className = 'text-sm text-blue-600';
+            
+            try {
+                const res = await fetch('/api/google-workspace/test', { method: 'POST' });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    status.textContent = '✅ ' + data.message;
+                    status.className = 'text-sm text-green-600';
+                    loadGoogleWorkspaceStatus();
+                } else {
+                    status.textContent = '❌ ' + (data.detail || 'Test failed');
+                    status.className = 'text-sm text-red-600';
+                }
+            } catch (e) {
+                status.textContent = '❌ Error: ' + e.message;
+                status.className = 'text-sm text-red-600';
+            }
+        }
+
+        // Check for OAuth callback result
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('google_success')) {
+            alert('✅ Google Workspace connected successfully!');
+            window.history.replaceState({}, document.title, '/');
+            loadGoogleWorkspaceStatus();
+        } else if (urlParams.get('google_error')) {
+            alert('❌ Google connection failed: ' + urlParams.get('google_error'));
+            window.history.replaceState({}, document.title, '/');
         }
 
         // Auto-refresh status every 30 seconds

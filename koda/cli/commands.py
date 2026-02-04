@@ -491,6 +491,102 @@ server {{
 
 
 # ============================================================================
+# Google Workspace Setup
+# ============================================================================
+
+
+@app.command("setup-google")
+def setup_google(
+    show_instructions: bool = typer.Option(False, "--instructions", "-i", help="Show setup instructions"),
+    test_only: bool = typer.Option(False, "--test", "-t", help="Test existing connection"),
+):
+    """Setup Google Workspace integration (Gmail, Calendar, Meet).
+    
+    This command guides you through connecting your Google account
+    for full Gmail, Calendar (including shared), and Meet integration.
+    """
+    from pathlib import Path
+    
+    if show_instructions:
+        from koda.integrations.google_workspace import GoogleWorkspaceClient
+        console.print(GoogleWorkspaceClient.SETUP_INSTRUCTIONS)
+        return
+    
+    console.print("\n[bold cyan]🔧 Google Workspace Setup[/bold cyan]\n")
+    
+    # Check for credentials file
+    creds_file = Path("~/.koda/google_credentials.json").expanduser()
+    
+    if not creds_file.exists():
+        console.print("[yellow]⚠️  Credentials file not found![/yellow]\n")
+        console.print("Je moet eerst een Google Cloud Project aanmaken en credentials downloaden.")
+        console.print("Run [cyan]koda setup-google --instructions[/cyan] voor de volledige handleiding.\n")
+        console.print("[bold]Korte versie:[/bold]")
+        console.print("1. Ga naar https://console.cloud.google.com/")
+        console.print("2. Maak een project en enable Gmail + Calendar APIs")
+        console.print("3. Maak OAuth credentials (Desktop app)")
+        console.print("4. Download JSON en sla op als ~/.koda/google_credentials.json")
+        console.print("\nDaarna kun je dit command opnieuw runnen.")
+        return
+    
+    # Check if already authorized
+    try:
+        from koda.integrations.google_workspace import GoogleWorkspaceClient
+        client = GoogleWorkspaceClient()
+        
+        if test_only or client.is_authorized:
+            console.print("Testing existing connection...\n")
+            success, message = client.test_connection()
+            
+            if success:
+                console.print(f"[green]✓[/green] {message}\n")
+                
+                # Show calendars
+                calendars = client.list_calendars()
+                console.print(f"[bold]Beschikbare Calendars ({len(calendars)}):[/bold]")
+                for cal in calendars:
+                    primary = " [primary]" if cal.is_primary else ""
+                    role = f"({cal.access_role})"
+                    console.print(f"  • {cal.name}{primary} {role}")
+                
+                console.print("\n[green]✓ Google Workspace is volledig geconfigureerd![/green]")
+                return
+            else:
+                console.print(f"[red]✗[/red] {message}")
+                if not test_only:
+                    console.print("\nOpnieuw authoriseren...\n")
+        
+        # Run authorization flow
+        console.print("Opening browser for Google authorization...")
+        console.print("[dim]Log in met je Google account en geef Koda toegang.[/dim]\n")
+        
+        if client.authorize_interactive():
+            console.print("\n[green]✓ Google Workspace succesvol verbonden![/green]")
+            
+            # Show what we have access to
+            success, message = client.test_connection()
+            console.print(f"  {message}")
+            
+            calendars = client.list_calendars()
+            console.print(f"\n[bold]Beschikbare Calendars ({len(calendars)}):[/bold]")
+            for cal in calendars:
+                primary = " [primary]" if cal.is_primary else ""
+                console.print(f"  • {cal.name}{primary}")
+            
+            console.print("\n[bold]Je kunt nu:[/bold]")
+            console.print("  • Gmail lezen en versturen")
+            console.print("  • Calendar events bekijken en maken")
+            console.print("  • Google Meet links aanmaken")
+            console.print("  • Shared calendars zien")
+        else:
+            console.print("\n[red]✗ Authorization failed. Probeer opnieuw.[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+# ============================================================================
 # Dashboard
 # ============================================================================
 
