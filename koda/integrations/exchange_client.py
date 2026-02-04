@@ -216,9 +216,19 @@ class ExchangeClient:
         calendar = account.calendar
         events = calendar.view(start=start_ews, end=end_ews)[:max_results]
         
-        return [
-            {
-                "id": str(item.id) if item.id else None,
+        result = []
+        for item in events:
+            # Extract the actual ID string from ItemId object
+            event_id = None
+            if item.id:
+                # ItemId has 'id' attribute containing the actual ID string
+                if hasattr(item.id, 'id'):
+                    event_id = item.id.id
+                else:
+                    event_id = str(item.id)
+            
+            result.append({
+                "id": event_id,
                 "subject": item.subject,
                 "start": item.start.isoformat() if item.start else None,
                 "end": item.end.isoformat() if item.end else None,
@@ -226,9 +236,8 @@ class ExchangeClient:
                 "body": item.body[:500] if item.body else None,
                 "organizer": str(item.organizer) if item.organizer else None,
                 "attendees": [str(a.mailbox.email_address) for a in (item.required_attendees or [])],
-            }
-            for item in events
-        ]
+            })
+        return result
     
     def create_calendar_event(
         self,
@@ -317,7 +326,13 @@ class ExchangeClient:
         
         # Find the event by ID
         try:
-            events = list(account.calendar.filter(id=event_id))
+            from exchangelib import ItemId
+            
+            # Create proper ItemId object from string
+            item_id = ItemId(id=event_id)
+            
+            # Get the event using the account's fetch method
+            events = list(account.fetch(ids=[item_id]))
             if not events:
                 logger.error(f"Event not found: {event_id}")
                 return False
@@ -357,7 +372,13 @@ class ExchangeClient:
         account = self._get_account()
         
         try:
-            events = list(account.calendar.filter(id=event_id))
+            from exchangelib import ItemId
+            
+            # Create proper ItemId object from string
+            item_id = ItemId(id=event_id)
+            
+            # Get the event using the account's fetch method
+            events = list(account.fetch(ids=[item_id]))
             if not events:
                 logger.error(f"Event not found: {event_id}")
                 return False

@@ -395,6 +395,7 @@ _Technische fout is gelogd op de server._"""
                     for e in events:
                         all_events.append({
                             "_account": account_name,
+                            "id": e.uid,  # Include UID for update/delete
                             "summary": e.summary,
                             "start": e.start.isoformat() if e.start else "",
                             "end": e.end.isoformat() if e.end else "",
@@ -430,10 +431,16 @@ _Technische fout is gelogd op de server._"""
                     pass
             
             account = e.get("_account", "")
+            event_id = e.get("id") or e.get("event_id") or e.get("uid", "")
+            
             output.append(f"• **{e.get('summary', '(No title)')}** [{account}]")
             output.append(f"  📅 {start}")
             if e.get("location"):
                 output.append(f"  📍 {e['location']}")
+            if event_id:
+                # Show short ID for readability
+                short_id = event_id[:20] + "..." if len(str(event_id)) > 20 else event_id
+                output.append(f"  🆔 `{short_id}`")
             output.append("")
         
         return "\n".join(output)
