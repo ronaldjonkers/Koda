@@ -120,27 +120,25 @@ class AgentLoop:
         # Build calendar accounts list from config
         calendar_accounts = []
         if full_config and hasattr(full_config, 'integrations'):
-            # Get calendar_accounts from config (may be dicts or models)
+            # First, get from unified accounts list (filter by calendar capability)
+            unified_accounts = getattr(full_config.integrations, 'accounts', []) or []
+            for acc in unified_accounts:
+                # Get capabilities
+                if isinstance(acc, dict):
+                    caps = acc.get('capabilities', [])
+                    acc_type = acc.get('type', '')
+                else:
+                    caps = getattr(acc, 'capabilities', [])
+                    acc_type = getattr(acc, 'type', '')
+                
+                # Include if has calendar capability or is calendar-compatible type
+                if 'calendar' in caps or acc_type in ('exchange', 'google', 'caldav'):
+                    calendar_accounts.append(self._account_to_dict(acc))
+            
+            # Also include legacy calendar_accounts for backward compatibility
             raw_accounts = getattr(full_config.integrations, 'calendar_accounts', []) or []
             for acc in raw_accounts:
-                if isinstance(acc, dict):
-                    calendar_accounts.append(acc)
-                else:
-                    # Convert Pydantic model to dict
-                    calendar_accounts.append({
-                        "name": getattr(acc, 'name', ''),
-                        "type": getattr(acc, 'type', ''),
-                        "enabled": getattr(acc, 'enabled', True),
-                        "email": getattr(acc, 'email', ''),
-                        "username": getattr(acc, 'username', ''),
-                        "password": getattr(acc, 'password', ''),
-                        "server": getattr(acc, 'server', ''),
-                        "use_autodiscover": getattr(acc, 'use_autodiscover', True),
-                        "credentials_file": getattr(acc, 'credentials_file', ''),
-                        "token_file": getattr(acc, 'token_file', ''),
-                        "url": getattr(acc, 'url', ''),
-                        "calendar_path": getattr(acc, 'calendar_path', ''),
-                    })
+                calendar_accounts.append(self._account_to_dict(acc))
         
         # Unified calendar tool (supports multiple named accounts)
         self.tools.register(UnifiedCalendarTool(
@@ -189,6 +187,43 @@ class AgentLoop:
                 password=linkedin_cfg.get("password", ""),
                 enabled=True
             ))
+    
+    def _account_to_dict(self, acc) -> dict:
+        """Convert account (dict or Pydantic model) to dict with snake_case keys."""
+        if isinstance(acc, dict):
+            # Handle camelCase to snake_case conversion
+            return {
+                "name": acc.get('name', ''),
+                "type": acc.get('type', ''),
+                "enabled": acc.get('enabled', True),
+                "email": acc.get('email', ''),
+                "username": acc.get('username', ''),
+                "password": acc.get('password', ''),
+                "server": acc.get('server', ''),
+                "use_autodiscover": acc.get('use_autodiscover', acc.get('useAutodiscover', False)),
+                "credentials_file": acc.get('credentials_file', acc.get('credentialsFile', '')),
+                "token_file": acc.get('token_file', acc.get('tokenFile', '')),
+                "url": acc.get('url', ''),
+                "calendar_path": acc.get('calendar_path', acc.get('calendarPath', '')),
+                "capabilities": acc.get('capabilities', []),
+            }
+        else:
+            # Convert Pydantic model to dict
+            return {
+                "name": getattr(acc, 'name', ''),
+                "type": getattr(acc, 'type', ''),
+                "enabled": getattr(acc, 'enabled', True),
+                "email": getattr(acc, 'email', ''),
+                "username": getattr(acc, 'username', ''),
+                "password": getattr(acc, 'password', ''),
+                "server": getattr(acc, 'server', ''),
+                "use_autodiscover": getattr(acc, 'use_autodiscover', False),
+                "credentials_file": getattr(acc, 'credentials_file', ''),
+                "token_file": getattr(acc, 'token_file', ''),
+                "url": getattr(acc, 'url', ''),
+                "calendar_path": getattr(acc, 'calendar_path', ''),
+                "capabilities": getattr(acc, 'capabilities', []),
+            }
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
