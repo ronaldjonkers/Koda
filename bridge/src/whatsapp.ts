@@ -18,29 +18,31 @@ import pino from 'pino';
 
 const VERSION = '0.1.0';
 
-// Suppress noisy Baileys session logs
-const originalConsoleLog = console.log;
-console.log = (...args: any[]) => {
-  const msg = args[0];
-  // Filter out session-related noise from Baileys
-  if (typeof msg === 'string' && (
-    msg.includes('Closing session') ||
-    msg.includes('SessionEntry') ||
-    msg.includes('_chains') ||
-    msg.includes('registrationId') ||
-    msg.includes('currentRatchet') ||
-    msg.includes('ephemeralKeyPair') ||
-    msg.includes('Buffer')
-  )) {
-    return; // Suppress
-  }
-  if (typeof msg === 'object' && msg !== null && (
-    msg._chains || msg.registrationId || msg.currentRatchet
-  )) {
-    return; // Suppress session objects
-  }
-  originalConsoleLog.apply(console, args);
+// Suppress noisy Baileys session logs - patch all console methods and stdout
+const shouldSuppress = (args: any[]): boolean => {
+  const str = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  return str.includes('Closing session') ||
+    str.includes('SessionEntry') ||
+    str.includes('_chains') ||
+    str.includes('registrationId') ||
+    str.includes('currentRatchet') ||
+    str.includes('ephemeralKeyPair') ||
+    str.includes('chainKey') ||
+    str.includes('messageKeys') ||
+    str.includes('privKey') ||
+    str.includes('pubKey') ||
+    str.includes('<Buffer');
 };
+
+const originalLog = console.log;
+const originalDebug = console.debug;
+const originalInfo = console.info;
+const originalWarn = console.warn;
+
+console.log = (...args: any[]) => { if (!shouldSuppress(args)) originalLog.apply(console, args); };
+console.debug = (...args: any[]) => { if (!shouldSuppress(args)) originalDebug.apply(console, args); };
+console.info = (...args: any[]) => { if (!shouldSuppress(args)) originalInfo.apply(console, args); };
+console.warn = (...args: any[]) => { if (!shouldSuppress(args)) originalWarn.apply(console, args); };
 
 export interface InboundMessage {
   id: string;
