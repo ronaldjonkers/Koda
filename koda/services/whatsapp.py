@@ -248,7 +248,8 @@ class WhatsAppChannel(BaseChannel):
 /removemail <naam> - Verwijder email account
 /removecalendar <naam> - Verwijder agenda account
 
-*Setup annuleren:*
+*Systeem:*
+/reload - Herlaad configuratie (na wijzigingen)
 /cancel - Annuleer lopende setup"""
 
         elif command == "/status":
@@ -341,6 +342,9 @@ _Gebruik /accounts voor details_"""
                 return "✅ Setup geannuleerd."
             return "ℹ️ Geen actieve setup om te annuleren."
         
+        elif command == "/reload":
+            return await self._reload_config()
+        
         return None  # Not a recognized command
     
     def _format_accounts(self, config) -> str:
@@ -387,6 +391,41 @@ _Gebruik /accounts voor details_"""
         
         lines.append("\n_Gebruik /addmail of /addcalendar om toe te voegen_")
         return "\n".join(lines)
+    
+    async def _reload_config(self) -> str:
+        """Reload configuration and notify the system."""
+        try:
+            # Reload config from disk
+            new_config = load_config()
+            
+            # Notify via message bus if available
+            if self._bus:
+                # Publish reload event so other services can pick it up
+                from koda.messaging.events import SystemEvent
+                try:
+                    await self._bus.publish(SystemEvent(
+                        type="config_reload",
+                        data={"source": "whatsapp"}
+                    ))
+                except Exception:
+                    pass  # Bus might not support SystemEvent yet
+            
+            # Count accounts
+            email_count = len(new_config.integrations.email_accounts) if hasattr(new_config.integrations, 'email_accounts') and new_config.integrations.email_accounts else 0
+            cal_count = len(new_config.integrations.calendar_accounts) if hasattr(new_config.integrations, 'calendar_accounts') and new_config.integrations.calendar_accounts else 0
+            
+            logger.info("Configuration reloaded via WhatsApp command")
+            
+            return f"""✅ *Configuratie herladen!*
+
+*Geladen accounts:*
+• Email: {email_count}
+• Agenda: {cal_count}
+
+ℹ️ Nieuwe accounts zijn nu beschikbaar voor de AI."""
+        except Exception as e:
+            logger.error(f"Error reloading config: {e}")
+            return f"❌ Fout bij herladen: {e}"
     
     def _start_email_setup(self, phone: str) -> str:
         """Start step-by-step email setup."""
@@ -924,8 +963,7 @@ Account *{data['name']}* is geconfigureerd voor:
 • 📧 Email
 • 📅 Agenda
 
-⚠️ *Herstart `koda gateway` om het account te activeren.*
-
+💡 Stuur /reload om de configuratie te activeren.
 Gebruik /accounts om je accounts te bekijken."""
         
         except Exception as e:
@@ -963,7 +1001,7 @@ Gebruik /accounts om je accounts te bekijken."""
             save_config(config)
             return f"""✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd!
 
-⚠️ *Herstart `koda gateway` om het account te activeren.*"""
+💡 Stuur /reload om de configuratie te activeren."""
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
