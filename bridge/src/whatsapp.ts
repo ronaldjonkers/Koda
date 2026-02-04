@@ -104,6 +104,29 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
+    // DEBUG: Log ALL events to diagnose self-message issue
+    const eventsToMonitor = [
+      'messages.upsert',
+      'messages.update', 
+      'messages.delete',
+      'message-receipt.update',
+      'messages.reaction',
+      'presence.update',
+      'chats.update',
+      'chats.upsert',
+      'contacts.update',
+      'contacts.upsert',
+    ];
+    
+    for (const eventName of eventsToMonitor) {
+      if (eventName !== 'messages.upsert') { // we handle this separately
+        this.sock.ev.on(eventName, (data: any) => {
+          console.log(`\n🔔 EVENT: ${eventName}`);
+          console.log(`Data: ${JSON.stringify(data, null, 2).substring(0, 500)}`);
+        });
+      }
+    }
+
     // Handle incoming messages - following OpenClaw's pattern exactly
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
