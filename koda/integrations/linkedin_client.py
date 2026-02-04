@@ -345,6 +345,108 @@ class LinkedInClient:
             logger.error(f"Failed to create post: {e}")
             return False
     
+    def get_my_posts(self, limit: int = 10) -> list[LinkedInPost]:
+        """Get my own posts."""
+        self._ensure_connected()
+        try:
+            # Get my profile URN first
+            my_profile = self._api.get_user_profile()
+            my_urn = my_profile.get('entityUrn', '') or my_profile.get('publicIdentifier', '')
+            
+            # Get posts from my profile
+            posts = self._api.get_profile_posts(my_urn, post_count=limit)
+            result = []
+            
+            for item in posts:
+                update = item if isinstance(item, dict) else {}
+                content = ''
+                post_urn = ''
+                likes = 0
+                comments = 0
+                
+                # Try different content locations
+                if 'commentary' in update:
+                    content = update.get('commentary', {}).get('text', '')
+                elif 'specificContent' in update:
+                    share = update.get('specificContent', {}).get('com.linkedin.ugc.ShareContent', {})
+                    content = share.get('shareCommentary', {}).get('text', '')
+                
+                # Get URN
+                post_urn = update.get('urn', '') or update.get('entityUrn', '')
+                
+                # Get social counts
+                social = update.get('socialDetail', {})
+                if social:
+                    counts = social.get('totalSocialActivityCounts', {})
+                    likes = counts.get('numLikes', 0)
+                    comments = counts.get('numComments', 0)
+                
+                if content or post_urn:
+                    result.append(LinkedInPost(
+                        post_id=post_urn,
+                        author_name="Me",
+                        author_urn=my_urn,
+                        author_headline="",
+                        content=content[:500] if content else "(media/share)",
+                        timestamp=datetime.fromtimestamp(update.get('createdTime', 0) / 1000) if update.get('createdTime') else datetime.now(),
+                        likes=likes,
+                        comments=comments,
+                        url=update.get('permalink')
+                    ))
+            
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get my posts: {e}")
+            return []
+    
+    def get_post_comments(self, post_urn: str, limit: int = 20) -> list[dict]:
+        """Get comments on a post."""
+        self._ensure_connected()
+        try:
+            comments = self._api.get_post_comments(post_urn, comment_count=limit)
+            result = []
+            
+            for comment in comments:
+                commenter = comment.get('commenter', {})
+                commenter_info = commenter.get('com.linkedin.voyager.feed.MemberActor', {})
+                mini_profile = commenter_info.get('miniProfile', {})
+                
+                result.append({
+                    'comment_id': comment.get('urn', ''),
+                    'author_name': f"{mini_profile.get('firstName', '')} {mini_profile.get('lastName', '')}".strip() or commenter_info.get('name', 'Unknown'),
+                    'author_urn': mini_profile.get('entityUrn', ''),
+                    'content': comment.get('comment', {}).get('values', [{}])[0].get('value', '') if isinstance(comment.get('comment', {}).get('values'), list) else comment.get('commentV2', {}).get('text', ''),
+                    'likes': comment.get('socialDetail', {}).get('totalSocialActivityCounts', {}).get('numLikes', 0),
+                    'timestamp': datetime.fromtimestamp(comment.get('createdTime', 0) / 1000).isoformat() if comment.get('createdTime') else None
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get post comments: {e}")
+            return []
+    
+    def reply_to_comment(self, post_urn: str, comment_urn: str, reply_text: str) -> bool:
+        """Reply to a comment on a post."""
+        self._ensure_connected()
+        try:
+            # The linkedin-api library may not have direct reply support
+            # We'll use comment_on_post with parent reference if available
+            self._api.comment_on_post(post_urn, reply_text, parent_comment_urn=comment_urn)
+            logger.info(f"Replied to comment {comment_urn}")
+            return True
+        except TypeError:
+            # If parent_comment_urn not supported, fall back to regular comment
+            try:
+                self._api.comment_on_post(post_urn, f"@reply: {reply_text}")
+                logger.info(f"Posted reply as new comment (reply threading not supported)")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to reply to comment: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to reply to comment: {e}")
+            return False
+    
     # ==================== PROFILES ====================
     
     def get_profile(self, public_id: str) -> Optional[LinkedInProfile]:

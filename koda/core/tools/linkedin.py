@@ -29,8 +29,11 @@ Actions:
 - accept_connection: Accept a connection request
 - reject_connection: Reject a connection request
 - get_feed: Get interesting posts from feed
+- get_my_posts: Get my own LinkedIn posts
+- get_post_comments: Get comments on a specific post
 - like_post: Like a post
 - comment_post: Comment on a post
+- reply_to_comment: Reply to a specific comment
 - create_post: Create a new LinkedIn post
 - search_people: Search for people on LinkedIn
 - get_profile: Get someone's profile"""
@@ -43,7 +46,8 @@ Actions:
                 "enum": [
                     "get_messages", "reply_message",
                     "get_connections", "accept_connection", "reject_connection",
-                    "get_feed", "like_post", "comment_post", "create_post",
+                    "get_feed", "get_my_posts", "get_post_comments",
+                    "like_post", "comment_post", "reply_to_comment", "create_post",
                     "search_people", "get_profile"
                 ],
                 "description": "The LinkedIn action to perform"
@@ -62,11 +66,19 @@ Actions:
             },
             "post_id": {
                 "type": "string",
-                "description": "Post ID for like_post or comment_post"
+                "description": "Post ID for like_post, comment_post, get_post_comments, or reply_to_comment"
             },
             "comment": {
                 "type": "string",
                 "description": "Comment text for comment_post"
+            },
+            "comment_id": {
+                "type": "string",
+                "description": "Comment ID for reply_to_comment"
+            },
+            "reply_text": {
+                "type": "string",
+                "description": "Reply text for reply_to_comment"
             },
             "query": {
                 "type": "string",
@@ -128,12 +140,25 @@ Actions:
                 return await self._reject_connection(kwargs.get('invitation_id', ''))
             elif action == "get_feed":
                 return await self._get_feed(kwargs.get('limit', 10))
+            elif action == "get_my_posts":
+                return await self._get_my_posts(kwargs.get('limit', 10))
+            elif action == "get_post_comments":
+                return await self._get_post_comments(
+                    kwargs.get('post_id', ''),
+                    kwargs.get('limit', 20)
+                )
             elif action == "like_post":
                 return await self._like_post(kwargs.get('post_id', ''))
             elif action == "comment_post":
                 return await self._comment_post(
                     kwargs.get('post_id', ''),
                     kwargs.get('comment', '')
+                )
+            elif action == "reply_to_comment":
+                return await self._reply_to_comment(
+                    kwargs.get('post_id', ''),
+                    kwargs.get('comment_id', ''),
+                    kwargs.get('reply_text', '')
                 )
             elif action == "create_post":
                 return await self._create_post(kwargs.get('message', ''))
@@ -299,6 +324,59 @@ Actions:
         return json.dumps({
             "success": success,
             "action": "posted"
+        })
+    
+    async def _get_my_posts(self, limit: int) -> str:
+        """Get my own posts."""
+        import asyncio
+        client = self._get_client()
+        posts = await asyncio.to_thread(client.get_my_posts, limit)
+        
+        result = []
+        for post in posts:
+            result.append({
+                "post_id": post.post_id,
+                "content": post.content[:500],
+                "likes": post.likes,
+                "comments": post.comments,
+                "timestamp": post.timestamp.isoformat() if post.timestamp else None,
+                "url": post.url
+            })
+        
+        return json.dumps({
+            "my_posts": result,
+            "count": len(result)
+        }, indent=2)
+    
+    async def _get_post_comments(self, post_id: str, limit: int) -> str:
+        """Get comments on a post."""
+        if not post_id:
+            return json.dumps({"error": "post_id is required"})
+        
+        import asyncio
+        client = self._get_client()
+        comments = await asyncio.to_thread(client.get_post_comments, post_id, limit)
+        
+        return json.dumps({
+            "comments": comments,
+            "count": len(comments),
+            "post_id": post_id
+        }, indent=2)
+    
+    async def _reply_to_comment(self, post_id: str, comment_id: str, reply_text: str) -> str:
+        """Reply to a comment on a post."""
+        if not post_id or not comment_id or not reply_text:
+            return json.dumps({"error": "post_id, comment_id, and reply_text are required"})
+        
+        import asyncio
+        client = self._get_client()
+        success = await asyncio.to_thread(client.reply_to_comment, post_id, comment_id, reply_text)
+        
+        return json.dumps({
+            "success": success,
+            "post_id": post_id,
+            "comment_id": comment_id,
+            "action": "replied"
         })
     
     async def _search_people(self, query: str, limit: int) -> str:
