@@ -39,6 +39,8 @@ except ImportError:
 
 # All scopes needed for full Google Workspace integration
 GOOGLE_SCOPES = [
+    # OpenID (Google adds this automatically, so we must request it)
+    "openid",
     # Gmail
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
