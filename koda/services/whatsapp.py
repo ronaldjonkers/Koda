@@ -403,11 +403,11 @@ _Use /accounts for details_"""
         """Automatically reload configuration after changes."""
         try:
             # Notify via message bus if available
-            if self._bus:
+            if self.bus:
                 # Publish reload event so other services can pick it up
                 from koda.messaging.events import SystemEvent
                 try:
-                    await self._bus.publish(SystemEvent(
+                    await self.bus.publish(SystemEvent(
                         type="config_reload",
                         data={"source": "whatsapp"}
                     ))
