@@ -846,6 +846,27 @@ def gateway(
     except Exception as e:
         logger.debug(f"Email watcher not started: {e}")
     
+    # Start calendar watcher for proactive event reminders
+    calendar_watcher = None
+    try:
+        from koda.services.calendar_watcher import create_calendar_watcher_from_config
+        
+        async def send_calendar_notification(phone: str, message: str):
+            """Send calendar notification via WhatsApp."""
+            from koda.messaging.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel="whatsapp",
+                chat_id=phone + "@s.whatsapp.net",
+                content=message
+            ))
+        
+        calendar_watcher = create_calendar_watcher_from_config(config, send_calendar_notification)
+        if calendar_watcher and calendar_watcher.source_count > 0:
+            calendar_watcher.start()
+            console.print(f"[green]✓[/green] Calendar watcher: {calendar_watcher.source_count} calendar(s) + morning briefing")
+    except Exception as e:
+        logger.debug(f"Calendar watcher not started: {e}")
+    
     async def run():
         try:
             await cron.start()
@@ -864,6 +885,8 @@ def gateway(
             stop_config_watcher()
             if email_watcher:
                 email_watcher.stop()
+            if calendar_watcher:
+                calendar_watcher.stop()
             heartbeat.stop()
             cron.stop()
             reminder_service.stop()
