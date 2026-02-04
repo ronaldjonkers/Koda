@@ -35,6 +35,10 @@ from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
 from koda.session.manager import SessionManager
+from koda.core.hooks import (
+    get_hooks_manager, HookEvent, HookEventType, 
+    trigger_hook, trigger_hook_async, create_hook_event
+)
 
 
 class AgentLoop:
@@ -320,6 +324,15 @@ class AgentLoop:
             return await self._process_system_message(msg)
         
         logger.info(f"🤖 Processing message from {msg.channel}:{msg.sender_id}: {msg.content[:80]}{'...' if len(msg.content) > 80 else ''}")
+        
+        # Trigger message received hook
+        await trigger_hook_async(create_hook_event(
+            HookEventType.MESSAGE_RECEIVED,
+            session_key=msg.session_key,
+            channel=msg.channel,
+            sender_id=msg.sender_id,
+            content=msg.content
+        ))
         
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
