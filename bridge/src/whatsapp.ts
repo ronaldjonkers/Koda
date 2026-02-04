@@ -99,17 +99,11 @@ export class WhatsAppClient {
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
         
-        // Log sock.user to see exact format
-        console.log('🔍 sock.user object:', JSON.stringify(this.sock.user, null, 2));
-        console.log('🔍 sock.user.id raw:', this.sock.user?.id);
-        
-        // CRITICAL: Send presence update like OpenClaw does
-        // This may be required for receiving messages
+        // Send presence update (required for receiving messages)
         try {
           await this.sock.sendPresenceUpdate('available');
-          console.log('📡 Sent presence update: available');
         } catch (err) {
-          console.error('Failed to send presence update:', err);
+          // Ignore presence errors
         }
         
         this.options.onStatus('connected');
@@ -119,58 +113,25 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // NUCLEAR OPTION: Listen to messages.update as well (self-messages might come here)
-    this.sock.ev.on('messages.update', (updates: any[]) => {
-      console.log(`\n🔄 messages.update EVENT FIRED!`);
-      console.log(`   Update count: ${updates?.length || 0}`);
-      for (const update of updates || []) {
-        console.log(`   Update key:`, JSON.stringify(update.key));
-        console.log(`   Update data:`, JSON.stringify(update.update || {}).substring(0, 300));
-        if (update.key?.fromMe) {
-          console.log(`   ⚠️ This is an update for a message FROM ME`);
-        }
-      }
-    });
-
-    // NUCLEAR OPTION: Listen to ALL events to see what's coming through
-    const eventsToLog = ['messaging-history.set', 'chats.upsert', 'chats.update', 'chats.delete', 'presence.update', 'contacts.upsert', 'contacts.update'];
-    for (const eventName of eventsToLog) {
-      this.sock.ev.on(eventName as any, (data: any) => {
-        console.log(`\n🔔 ${eventName} EVENT:`, JSON.stringify(data).substring(0, 200));
-      });
-    }
-
-    // Handle incoming messages - using jidDecode for robust self-message detection
+    // Handle incoming messages
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
-      // LOG EVERYTHING to diagnose
-      console.log(`\n🔔 messages.upsert EVENT FIRED!`);
-      console.log(`   Type: ${type}`);
-      console.log(`   Message count: ${messages?.length || 0}`);
-      console.log(`   Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 1500));
-      
-      // Accept ALL types for now to debug - don't filter yet
-      // if (type !== 'notify' && type !== 'append') {
-      //   console.log(`   ↳ Skipping: type "${type}" not notify/append`);
-      //   return;
-      // }
+      // Only process notify (real-time) and append (history sync)
+      if (type !== 'notify' && type !== 'append') {
+        return;
+      }
       
       // Use jidDecode for robust JID extraction
       const me = jidDecode(this.sock.user?.id)?.user;
       const myJid = me ? `${me}@s.whatsapp.net` : null;
-      console.log(`   My decoded JID: ${myJid} (from sock.user.id: ${this.sock.user?.id})`);
       
       for (const msg of messages) {
         const remoteJid = msg.key?.remoteJid;
-        if (!remoteJid) {
-          console.log(`   ↳ Message has no remoteJid, skipping`);
-          continue;
-        }
+        if (!remoteJid) continue;
         
         // Skip status updates and broadcasts
         if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) {
-          console.log(`   ↳ Skipping status/broadcast: ${remoteJid}`);
           continue;
         }
         
@@ -181,36 +142,18 @@ export class WhatsAppClient {
         const decodedRemote = jidDecode(remoteJid);
         const decodedRemoteJid = decodedRemote?.user ? `${decodedRemote.user}@s.whatsapp.net` : null;
         
-        // Check for BOTH: the special "me" JID AND matching phone number
+        // Check for self-chat: special "me" JID or matching phone number
         const isMessageToSelf = remoteJid === 'me' || (!isGroup && decodedRemoteJid === myJid);
         
-        const content = this.extractMessageContent(msg);
-        
-        // Log EVERY message - including outgoing - for debugging
-        console.log(`📨 Message details:`);
-        console.log(`   remoteJid: ${remoteJid}`);
-        console.log(`   decodedRemoteJid: ${decodedRemoteJid}`);
-        console.log(`   myJid: ${myJid}`);
-        console.log(`   fromMe: ${isMe}`);
-        console.log(`   isGroup: ${isGroup}`);
-        console.log(`   isMessageToSelf: ${isMessageToSelf}`);
-        console.log(`   type: ${type}`);
-        console.log(`   content: ${content ? `"${content.substring(0, 50)}..."` : '(none)'}`);
-        
-        // For now, DON'T skip outgoing messages - log them all
+        // Skip outgoing messages to others (but allow self-chat)
         if (isMe && !isMessageToSelf) {
-          console.log(`   ⚠️ This is an OUTGOING message to someone else (would normally skip)`);
-          // continue; // Commented out for debugging
-        }
-        
-        if (!content) {
-          console.log(`   ↳ No text content to process`);
           continue;
         }
         
-        const sender = isMessageToSelf && myJid ? myJid : remoteJid;
+        const content = this.extractMessageContent(msg);
+        if (!content) continue;
         
-        console.log(`✅ Processing: from=${sender}`);
+        const sender = isMessageToSelf && myJid ? myJid : remoteJid;
         
         this.options.onMessage({
           id: msg.key.id || '',
