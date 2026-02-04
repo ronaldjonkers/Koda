@@ -497,3 +497,126 @@ class ExchangeClient:
             }
             for item in emails
         ]
+    
+    # =========================================================================
+    # Contacts Operations
+    # =========================================================================
+    
+    def list_contacts(self, max_results: int = 100) -> list[dict[str, Any]]:
+        """
+        List contacts from Exchange.
+        
+        Args:
+            max_results: Maximum number of contacts to retrieve
+        
+        Returns:
+            List of contact dictionaries
+        """
+        account = self._get_account()
+        
+        contacts = []
+        for item in account.contacts.all()[:max_results]:
+            contact = self._contact_to_dict(item)
+            if contact.get("name") or contact.get("email"):
+                contacts.append(contact)
+        
+        logger.info(f"Retrieved {len(contacts)} contacts from Exchange")
+        return contacts
+    
+    def search_contacts(self, query: str, max_results: int = 50) -> list[dict[str, Any]]:
+        """
+        Search contacts by name, email, or company.
+        
+        Args:
+            query: Search query string
+            max_results: Maximum number of results
+        
+        Returns:
+            List of matching contact dictionaries
+        """
+        account = self._get_account()
+        from exchangelib import Q
+        
+        query_filter = (
+            Q(display_name__icontains=query) |
+            Q(email_addresses__icontains=query) |
+            Q(company_name__icontains=query) |
+            Q(given_name__icontains=query) |
+            Q(surname__icontains=query)
+        )
+        
+        contacts = []
+        for item in account.contacts.filter(query_filter)[:max_results]:
+            contact = self._contact_to_dict(item)
+            if contact.get("name") or contact.get("email"):
+                contacts.append(contact)
+        
+        logger.info(f"Found {len(contacts)} contacts matching '{query}'")
+        return contacts
+    
+    def get_contact_by_email(self, email: str) -> dict[str, Any] | None:
+        """
+        Get a contact by email address.
+        
+        Args:
+            email: Email address to search for
+        
+        Returns:
+            Contact dictionary or None if not found
+        """
+        account = self._get_account()
+        from exchangelib import Q
+        
+        results = list(account.contacts.filter(
+            Q(email_addresses__icontains=email)
+        )[:1])
+        
+        if results:
+            return self._contact_to_dict(results[0])
+        return None
+    
+    def _contact_to_dict(self, contact) -> dict[str, Any]:
+        """Convert Exchange contact to dictionary."""
+        # Get primary email
+        email = None
+        emails = []
+        if hasattr(contact, 'email_addresses') and contact.email_addresses:
+            for addr in contact.email_addresses:
+                if hasattr(addr, 'email'):
+                    emails.append(addr.email)
+                elif isinstance(addr, str):
+                    emails.append(addr)
+            email = emails[0] if emails else None
+        
+        # Get phone numbers
+        phones = []
+        for phone_attr in ['phone_numbers', 'business_phones', 'home_phones', 'mobile_phone']:
+            if hasattr(contact, phone_attr):
+                phone_val = getattr(contact, phone_attr)
+                if phone_val:
+                    if isinstance(phone_val, (list, tuple)):
+                        phones.extend([str(p) for p in phone_val if p])
+                    else:
+                        phones.append(str(phone_val))
+        
+        # Build name
+        name_parts = []
+        if hasattr(contact, 'given_name') and contact.given_name:
+            name_parts.append(contact.given_name)
+        if hasattr(contact, 'surname') and contact.surname:
+            name_parts.append(contact.surname)
+        
+        name = " ".join(name_parts) if name_parts else getattr(contact, 'display_name', None)
+        
+        return {
+            "name": name or "",
+            "firstName": getattr(contact, 'given_name', None),
+            "lastName": getattr(contact, 'surname', None),
+            "email": email,
+            "emails": emails,
+            "phones": phones,
+            "company": getattr(contact, 'company_name', None),
+            "jobTitle": getattr(contact, 'job_title', None),
+            "department": getattr(contact, 'department', None),
+            "birthday": str(contact.birthday) if hasattr(contact, 'birthday') and contact.birthday else None,
+        }

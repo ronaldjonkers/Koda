@@ -201,12 +201,21 @@ class AccountManager:
             logger.warning(f"Calendar test failed: {e}")
             sample_data["events"] = f"Error: {e}"
         
+        # Test contacts access
+        try:
+            contacts = client.list_contacts(max_results=5)
+            sample_data["contacts"] = len(contacts)
+            sample_data["contact_names"] = [c.get("name", "")[:30] for c in contacts[:5]]
+        except Exception as e:
+            logger.warning(f"Contacts test failed: {e}")
+            sample_data["contacts"] = f"Error: {e}"
+        
         # Consider success if at least one worked
-        if isinstance(sample_data.get("emails"), int) or isinstance(sample_data.get("events"), int):
-            msg = f"Connected! Found {sample_data.get('emails', 0)} emails, {sample_data.get('events', 0)} events"
+        if isinstance(sample_data.get("emails"), int) or isinstance(sample_data.get("events"), int) or isinstance(sample_data.get("contacts"), int):
+            msg = f"Connected! Found {sample_data.get('emails', 0)} emails, {sample_data.get('events', 0)} events, {sample_data.get('contacts', 0)} contacts"
             return True, msg, sample_data
         else:
-            return False, "Could not access email or calendar", sample_data
+            return False, "Could not access email, calendar, or contacts", sample_data
     
     def _test_imap(self, account_data: dict) -> tuple[bool, str, dict | None]:
         """Test IMAP connection by fetching inbox."""
