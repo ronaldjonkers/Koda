@@ -97,6 +97,16 @@ export class WhatsAppClient {
         }
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
+        
+        // CRITICAL: Send presence update like OpenClaw does
+        // This may be required for receiving messages
+        try {
+          await this.sock.sendPresenceUpdate('available');
+          console.log('� Sent presence update: available');
+        } catch (err) {
+          console.error('Failed to send presence update:', err);
+        }
+        
         this.options.onStatus('connected');
       }
     });
@@ -104,101 +114,46 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // DEBUG: Use ev.process to capture ALL events without exception
-    // This is the most comprehensive way to see everything Baileys receives
-    this.sock.ev.process(async (events: any) => {
-      console.log(`\n🔔🔔🔔 RAW EVENTS BATCH 🔔🔔🔔`);
-      console.log(`Event keys: ${Object.keys(events).join(', ')}`);
-      
-      for (const [eventName, eventData] of Object.entries(events)) {
-        console.log(`\n--- Event: ${eventName} ---`);
-        console.log(JSON.stringify(eventData, null, 2).substring(0, 800));
-      }
-      console.log(`🔔🔔🔔 END RAW EVENTS 🔔🔔🔔\n`);
-    });
-
-    // Handle incoming messages - process ALL types for debugging
+    // Handle incoming messages - following OpenClaw's exact pattern
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
-      console.log(`\n📨 ===== NEW MESSAGE EVENT =====`);
-      console.log(`Type: ${type}, Count: ${messages.length}`);
-      console.log(`Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 1000));
-      
-      // Process ALL types for now (including append for history sync)
-      // This helps capture self-messages which may come through differently
-      
-      // Get my own phone number for self-message detection
-      // JID format can be: "31614254251:123@s.whatsapp.net" (with device) or "31614254251@s.whatsapp.net"
-      const myJid = this.sock.user?.id;
-      const myPhone = myJid ? myJid.split('@')[0].split(':')[0] : null;
-      console.log(`My JID: ${myJid}`);
-      console.log(`My Phone (extracted): ${myPhone}`);
-      
-      if (!myPhone) {
-        console.log(`WARNING: Could not extract my phone number from JID`);
+      // Only process notify (real-time) and append (history sync)
+      if (type !== 'notify' && type !== 'append') {
+        return;
       }
       
+      const myJid = this.sock.user?.id;
+      const myPhone = myJid ? myJid.split('@')[0].split(':')[0] : null;
+      
       for (const msg of messages) {
-        console.log(`\n--- Message ${msg.key?.id || 'unknown'} ---`);
-        console.log(`Full key:`, JSON.stringify(msg.key));
-        
         const remoteJid = msg.key?.remoteJid;
-        if (!remoteJid) {
-          console.log(`Skipping: no remoteJid`);
-          continue;
-        }
-        
-        console.log(`remoteJid: ${remoteJid}`);
-        console.log(`fromMe: ${msg.key.fromMe}`);
-        console.log(`participant: ${msg.key.participant || 'none'}`);
+        if (!remoteJid) continue;
         
         // Skip status updates and broadcasts
         if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) {
-          console.log(`Skipping: status/broadcast`);
           continue;
         }
         
-        // Extract phone from remoteJid (also handle device suffix like "123:456@s.whatsapp.net")
         const senderPhone = remoteJid.split('@')[0].split(':')[0];
         const isGroup = remoteJid.endsWith('@g.us');
-        
-        // Check if this is a self-chat (messaging yourself)
-        // In WhatsApp, when you message yourself:
-        // - remoteJid = your own phone number (e.g., "31614254251@s.whatsapp.net")
-        // - fromMe can be true OR false depending on the message
         const isSelfChat = !isGroup && myPhone && senderPhone === myPhone;
+        const isFromMe = Boolean(msg.key?.fromMe);
         
-        console.log(`senderPhone: ${senderPhone}, myPhone: ${myPhone}`);
-        console.log(`Is self-chat: ${isSelfChat}, isGroup: ${isGroup}, fromMe: ${msg.key.fromMe}`);
+        // Log ALL messages for debugging
+        console.log(`📨 Message: remoteJid=${remoteJid}, fromMe=${isFromMe}, isSelfChat=${isSelfChat}, type=${type}`);
         
-        // OpenClaw pattern: Skip outbound DMs (fromMe=true) UNLESS it's a self-chat
-        // This ensures we only process:
-        // 1. Messages FROM others (fromMe=false) 
-        // 2. Messages in self-chat (isSelfChat=true, regardless of fromMe)
-        if (msg.key.fromMe && !isSelfChat) {
-          console.log(`Skipping: outbound message to others (fromMe=true, not self-chat)`);
+        // OpenClaw pattern: Skip outbound DMs UNLESS it's a self-chat
+        if (isFromMe && !isSelfChat) {
           continue;
         }
         
         const content = this.extractMessageContent(msg);
-        if (!content) {
-          console.log(`Skipping: no extractable content`);
-          console.log(`Message object:`, JSON.stringify(msg.message || {}, null, 2).substring(0, 500));
-          continue;
-        }
+        if (!content) continue;
         
-        console.log(`Content: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`);
+        const finalSender = isSelfChat && myPhone ? `${myPhone}@s.whatsapp.net` : remoteJid;
         
-        // Determine the sender for the message
-        // For self-chat, use the phone number directly
-        let finalSender = remoteJid;
-        if (isSelfChat && myPhone) {
-          finalSender = `${myPhone}@s.whatsapp.net`;
-          console.log(`🔄 Self-chat message detected! Using sender: ${finalSender}`);
-        }
-        
-        console.log(`✅ Forwarding to Python bridge: ${finalSender}`);
+        console.log(`✅ Processing: from=${finalSender}, content="${content.substring(0, 50)}..."`);
         
         this.options.onMessage({
           id: msg.key.id || '',
@@ -208,7 +163,6 @@ export class WhatsAppClient {
           isGroup,
         });
       }
-      console.log(`===== END MESSAGE EVENT =====\n`);
     });
   }
 
