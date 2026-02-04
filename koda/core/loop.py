@@ -23,6 +23,7 @@ from koda.core.tools.accounts import AccountsTool
 from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
 from koda.core.tools.script import ScriptTool
+from koda.core.tools.schedule import ScheduleTool
 from koda.core.tools.linkedin import LinkedInTool
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -50,7 +51,8 @@ class AgentLoop:
         max_iterations: int = 20,
         brave_api_key: str | None = None,
         calendar_config: dict | None = None,
-        reminder_service: Any = None
+        reminder_service: Any = None,
+        cron_service: Any = None
     ):
         self.bus = bus
         self.provider = provider
@@ -60,6 +62,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.calendar_config = calendar_config or {}
         self.reminder_service = reminder_service
+        self.cron_service = cron_service
         self.assistant_config = calendar_config.get("assistant_config", {}) if calendar_config else {}
         
         # Build context with assistant personalization
@@ -171,6 +174,10 @@ class AgentLoop:
         
         # Script tool (Python, Bash, Node.js)
         self.tools.register(ScriptTool(workspace=self.workspace))
+        
+        # Schedule tool (cron jobs for recurring tasks)
+        if self.cron_service:
+            self.tools.register(ScheduleTool(cron_service=self.cron_service))
         
         # LinkedIn tool
         linkedin_cfg = self.calendar_config.get("linkedin", {})

@@ -293,6 +293,19 @@ class CronService:
         logger.info(f"Cron: added job '{name}' ({job.id})")
         return job
     
+    def get_job(self, job_id: str) -> CronJob | None:
+        """Get a job by ID."""
+        store = self._load_store()
+        for job in store.jobs:
+            if job.id == job_id:
+                return job
+        return None
+    
+    def set_job_enabled(self, job_id: str, enabled: bool) -> bool:
+        """Enable or disable a job. Returns True if job was found."""
+        result = self.enable_job(job_id, enabled)
+        return result is not None
+    
     def remove_job(self, job_id: str) -> bool:
         """Remove a job by ID."""
         store = self._load_store()

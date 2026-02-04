@@ -725,6 +725,10 @@ def gateway(
     from koda.core.tools.reminder import ReminderTool
     agent.tools.register(ReminderTool(reminder_service=reminder_service))
     
+    # Register schedule tool with cron service
+    from koda.core.tools.schedule import ScheduleTool
+    agent.tools.register(ScheduleTool(cron_service=cron))
+    
     # Update unified calendar tool with reminder service
     agent.reminder_service = reminder_service
     for tool in agent.tools._tools.values():

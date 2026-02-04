@@ -447,9 +447,11 @@ Step 1/2: Enter your LinkedIn email address:
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""
         try:
-            # Reload config from file
+            # Reload config from file and extract WhatsApp config
             from koda.config.loader import load_config
-            self.config = load_config()
+            full_config = load_config()
+            self.config = full_config.channels.whatsapp
+            self._full_config = full_config  # Keep reference to full config for account operations
             logger.info("Configuration reloaded after account change")
         except Exception as e:
             logger.error(f"Error auto-reloading config: {e}")
