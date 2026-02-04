@@ -369,6 +369,8 @@ _Technische fout is gelogd op de server._"""
         
         title = "Today's events" if today_only else f"Events (next {days} days)"
         
+        logger.debug(f"Fetching events from {len(self.calendar_accounts)} calendar accounts: {[a.get('name') for a in self.calendar_accounts]}")
+        
         for account in self.calendar_accounts:
             account_name = account.get("name", "Unknown")
             account_type = account.get("type", "")
@@ -376,22 +378,29 @@ _Technische fout is gelogd op de server._"""
             try:
                 client = self._get_client_for_account(account)
                 if not client:
+                    logger.warning(f"No client available for {account_name} (type={account_type})")
                     continue
+                
+                logger.debug(f"Fetching events from {account_name} using {type(client).__name__}")
                 
                 if account_type == "google":
                     # GoogleWorkspaceClient uses list_events()
-                    now = datetime.now()
+                    # Use timezone-aware datetimes for Google API
+                    from datetime import timezone
+                    now = datetime.now(timezone.utc)
                     if today_only:
                         time_max = now.replace(hour=23, minute=59, second=59)
                     else:
                         time_max = now + timedelta(days=days)
                     
                     # Use calendar_id="all" to get events from all calendars
+                    logger.debug(f"Google calendar query: {now.isoformat()} to {time_max.isoformat()}")
                     events = client.list_events(
                         calendar_id="all",
                         time_min=now,
                         time_max=time_max
                     )
+                    logger.debug(f"Google returned {len(events)} events")
                     for e in events:
                         # Convert GoogleCalendarEvent dataclass to dict
                         event_dict = {
@@ -433,7 +442,9 @@ _Technische fout is gelogd op de server._"""
                         })
             
             except Exception as e:
+                import traceback
                 logger.warning(f"{account_name} calendar error: {e}")
+                logger.debug(f"Calendar error traceback:\n{traceback.format_exc()}")
         
         if not all_events:
             return f"{title}: No events found."
