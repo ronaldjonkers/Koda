@@ -248,8 +248,7 @@ class WhatsAppChannel(BaseChannel):
 /removemail <naam> - Verwijder email account
 /removecalendar <naam> - Verwijder agenda account
 
-*Systeem:*
-/reload - Herlaad configuratie (na wijzigingen)
+*Overig:*
 /cancel - Annuleer lopende setup"""
 
         elif command == "/status":
@@ -342,9 +341,6 @@ _Gebruik /accounts voor details_"""
                 return "✅ Setup geannuleerd."
             return "ℹ️ Geen actieve setup om te annuleren."
         
-        elif command == "/reload":
-            return await self._reload_config()
-        
         return None  # Not a recognized command
     
     def _format_accounts(self, config) -> str:
@@ -392,12 +388,9 @@ _Gebruik /accounts voor details_"""
         lines.append("\n_Gebruik /addmail of /addcalendar om toe te voegen_")
         return "\n".join(lines)
     
-    async def _reload_config(self) -> str:
-        """Reload configuration and notify the system."""
+    async def _auto_reload_config(self) -> None:
+        """Automatically reload configuration after changes."""
         try:
-            # Reload config from disk
-            new_config = load_config()
-            
             # Notify via message bus if available
             if self._bus:
                 # Publish reload event so other services can pick it up
@@ -410,22 +403,9 @@ _Gebruik /accounts voor details_"""
                 except Exception:
                     pass  # Bus might not support SystemEvent yet
             
-            # Count accounts
-            email_count = len(new_config.integrations.email_accounts) if hasattr(new_config.integrations, 'email_accounts') and new_config.integrations.email_accounts else 0
-            cal_count = len(new_config.integrations.calendar_accounts) if hasattr(new_config.integrations, 'calendar_accounts') and new_config.integrations.calendar_accounts else 0
-            
-            logger.info("Configuration reloaded via WhatsApp command")
-            
-            return f"""✅ *Configuratie herladen!*
-
-*Geladen accounts:*
-• Email: {email_count}
-• Agenda: {cal_count}
-
-ℹ️ Nieuwe accounts zijn nu beschikbaar voor de AI."""
+            logger.info("Configuration auto-reloaded after account change")
         except Exception as e:
-            logger.error(f"Error reloading config: {e}")
-            return f"❌ Fout bij herladen: {e}"
+            logger.error(f"Error auto-reloading config: {e}")
     
     def _start_email_setup(self, phone: str) -> str:
         """Start step-by-step email setup."""
@@ -623,11 +603,11 @@ Stuur 1 of 2:"""
             # Ask about using same account for calendar
             if content.lower() in ["ja", "yes", "j", "y", "1"]:
                 # Copy email account to calendar
-                result = self._save_exchange_for_both(data, "email")
+                result = await self._save_exchange_for_both(data, "email")
                 del self._setup_sessions[phone]
                 return result
             else:
-                result = self._save_account_from_data("email", data)
+                result = await self._save_account_from_data("email", data)
                 del self._setup_sessions[phone]
                 return result
         
@@ -651,7 +631,7 @@ Stuur 1 of 2:"""
             data["name"] = content
             data["port"] = 993
             data["use_ssl"] = True
-            result = self._save_account_from_data("email", data)
+            result = await self._save_account_from_data("email", data)
             del self._setup_sessions[phone]
             return result
         
@@ -736,11 +716,11 @@ Stuur 1 of 2:"""
         elif step == 9 and data["type"] == "exchange":
             # Ask about using same account for email
             if content.lower() in ["ja", "yes", "j", "y", "1"]:
-                result = self._save_exchange_for_both(data, "calendar")
+                result = await self._save_exchange_for_both(data, "calendar")
                 del self._setup_sessions[phone]
                 return result
             else:
-                result = self._save_account_from_data("calendar", data)
+                result = await self._save_account_from_data("calendar", data)
                 del self._setup_sessions[phone]
                 return result
         
@@ -762,7 +742,7 @@ Stuur 1 of 2:"""
         
         elif step == 5 and data["type"] == "caldav":
             data["name"] = content
-            result = self._save_account_from_data("calendar", data)
+            result = await self._save_account_from_data("calendar", data)
             del self._setup_sessions[phone]
             return result
         
@@ -929,7 +909,7 @@ Stuur een nummer:"""
         else:
             return "❌ Kies een nummer (1-7):"
     
-    def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
+    async def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
         """Save Exchange account for both email and calendar."""
         config = load_config()
         
@@ -957,20 +937,22 @@ Stuur een nummer:"""
             
             save_config(config)
             
+            # Auto-reload config
+            await self._auto_reload_config()
+            
             return f"""✅ *Exchange account toegevoegd!*
 
 Account *{data['name']}* is geconfigureerd voor:
 • 📧 Email
 • 📅 Agenda
 
-💡 Stuur /reload om de configuratie te activeren.
-Gebruik /accounts om je accounts te bekijken."""
+Het account is direct actief."""
         
         except Exception as e:
             logger.error(f"Error saving Exchange account: {e}")
             return f"❌ Fout bij opslaan: {e}"
     
-    def _save_account_from_data(self, account_type: str, data: dict) -> str:
+    async def _save_account_from_data(self, account_type: str, data: dict) -> str:
         """Save account from setup data."""
         config = load_config()
         
@@ -999,9 +981,11 @@ Gebruik /accounts om je accounts te bekijken."""
                 config.integrations.calendar_accounts.append(account_data)
             
             save_config(config)
-            return f"""✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd!
-
-💡 Stuur /reload om de configuratie te activeren."""
+            
+            # Auto-reload config
+            await self._auto_reload_config()
+            
+            return f"✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd en actief!"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
