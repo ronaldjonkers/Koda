@@ -731,14 +731,17 @@ Stuur 1 of 2:"""
     
     async def _test_exchange_connection(self, phone: str, data: dict, account_type: str) -> str:
         """Test Exchange connection and return result."""
+        import traceback
         session = self._setup_sessions[phone]
         
         logger.info(f"Testing Exchange connection for {data.get('email')}...")
+        logger.info(f"Settings: username={data.get('username')}, server={data.get('server')}, autodiscover={data.get('use_autodiscover')}")
         
         try:
             from exchangelib import Credentials, Account, Configuration, DELEGATE
             from exchangelib.errors import UnauthorizedError, TransportError
             
+            logger.info("Creating credentials...")
             credentials = Credentials(
                 username=data.get("username", data.get("email")),
                 password=data.get("password")
@@ -768,11 +771,17 @@ Stuur 1 of 2:"""
                     access_type=DELEGATE
                 )
             
+            logger.info("Account created, testing access...")
+            
             # Test by accessing inbox/calendar
             if account_type == "email":
-                _ = account.inbox.total_count
+                logger.info("Testing inbox access...")
+                count = account.inbox.total_count
+                logger.info(f"Inbox has {count} items")
             else:
-                _ = account.calendar.all()[:1]
+                logger.info("Testing calendar access...")
+                items = list(account.calendar.all()[:1])
+                logger.info(f"Calendar accessible, found {len(items)} items")
             
             logger.info("Exchange connection successful!")
             session["step"] = 9
@@ -787,29 +796,34 @@ Server: {data.get('server') or 'autodiscover'}
 Wil je dit account ook gebruiken voor *{other_type}*?
 (Ja/Nee)"""
         
-        except ImportError:
-            logger.error("exchangelib not installed")
-            session["step"] = 8
-            session["last_error"] = "exchangelib niet geïnstalleerd"
-            return self._format_exchange_error("exchangelib library niet gevonden. Run: pip install exchangelib", data)
-        
-        except UnauthorizedError as e:
-            logger.error(f"Exchange auth error: {e}")
+        except ImportError as e:
+            logger.error(f"exchangelib import error: {e}")
+            logger.error(traceback.format_exc())
             session["step"] = 8
             session["last_error"] = str(e)
-            return self._format_exchange_error("Authenticatie mislukt. Controleer email/gebruikersnaam en wachtwoord.", data)
-        
-        except TransportError as e:
-            logger.error(f"Exchange transport error: {e}")
-            session["step"] = 8
-            session["last_error"] = str(e)
-            return self._format_exchange_error(f"Kan geen verbinding maken met server: {e}", data)
+            return self._format_exchange_error(f"exchangelib niet gevonden: {e}\nRun: pip install exchangelib", data)
         
         except Exception as e:
-            logger.error(f"Exchange error: {type(e).__name__}: {e}")
+            # Catch all exceptions with full traceback
+            error_type = type(e).__name__
+            error_msg = str(e) or "(geen details)"
+            full_traceback = traceback.format_exc()
+            
+            logger.error(f"Exchange error: {error_type}: {error_msg}")
+            logger.error(f"Full traceback:\n{full_traceback}")
+            
             session["step"] = 8
-            session["last_error"] = str(e)
-            return self._format_exchange_error(f"{type(e).__name__}: {e}", data)
+            session["last_error"] = f"{error_type}: {error_msg}"
+            
+            # Provide more specific error messages
+            if "Unauthorized" in error_type or "401" in str(e):
+                return self._format_exchange_error("Authenticatie mislukt. Controleer email/gebruikersnaam en wachtwoord.", data)
+            elif "Transport" in error_type or "Connection" in error_type:
+                return self._format_exchange_error(f"Kan geen verbinding maken met server: {error_msg}", data)
+            elif "Autodiscover" in str(e) or "autodiscover" in str(e).lower():
+                return self._format_exchange_error(f"Autodiscover mislukt: {error_msg}\nProbeer handmatig een server in te voeren.", data)
+            else:
+                return self._format_exchange_error(f"{error_type}: {error_msg}", data)
     
     def _format_exchange_error(self, error: str, data: dict) -> str:
         """Format Exchange error message with retry options."""
