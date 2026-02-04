@@ -740,20 +740,9 @@ Stuur 1 of 2:"""
         try:
             from exchangelib import Credentials, Account, Configuration, DELEGATE, Build, Version
             from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
-            from requests.auth import HTTPBasicAuth
             
             # Use NoVerifyHTTPAdapter to avoid SSL issues
             BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
-            
-            # Override NTLM with Basic auth to avoid urllib3 compatibility issues
-            class BasicAuthAdapter(NoVerifyHTTPAdapter):
-                def __init__(self, username, password, *args, **kwargs):
-                    self._basic_auth = HTTPBasicAuth(username, password)
-                    super().__init__(*args, **kwargs)
-                
-                def send(self, request, *args, **kwargs):
-                    request = self._basic_auth(request)
-                    return super().send(request, *args, **kwargs)
             
             logger.info("Creating credentials...")
             username = data.get("username", data.get("email"))
@@ -776,9 +765,6 @@ Stuur 1 of 2:"""
                 
                 # Try with explicit version to skip problematic version detection
                 version = Version(build=Build(15, 1, 0, 0))  # Exchange 2016
-                
-                # Use Basic auth adapter
-                BaseProtocol.HTTP_ADAPTER_CLS = lambda: BasicAuthAdapter(username, password)
                 
                 config = Configuration(
                     server=data["server"],

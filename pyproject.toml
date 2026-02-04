@@ -37,6 +37,8 @@ dependencies = [
     "google-auth-oauthlib>=1.0.0",
     # Microsoft Exchange (Calendar, Email)
     "exchangelib>=5.0.0",
+    # Pin urllib3 to version compatible with requests_ntlm (NTLM auth for Exchange)
+    "urllib3>=1.26.0,<2.0.0",
     # iCloud Contacts
     "pyicloud>=1.0.0",
     # vCard parsing for contacts
