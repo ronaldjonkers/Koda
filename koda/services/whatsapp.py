@@ -950,9 +950,7 @@ The assistant can now:
 • View and interact with posts
 • Search for people
 
-⚠️ *Important:* LinkedIn may require you to verify new logins. If you see issues, check your LinkedIn email for verification requests.
-
-_Restart Koda to activate: `koda gateway`_"""
+⚠️ *Important:* LinkedIn may require you to verify new logins. If you see issues, check your LinkedIn email for verification requests."""
         
         return None
     
