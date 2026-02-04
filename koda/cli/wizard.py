@@ -412,40 +412,56 @@ class SetupWizard:
         # Add new account
         self._add_calendar_account()
     
-    def _add_calendar_account(self) -> None:
-        """Add a new calendar account."""
+    def _add_calendar_account(self, existing_account: "CalendarAccount | None" = None) -> None:
+        """Add a new calendar account. If existing_account provided, use as defaults for retry."""
         from koda.config.schema import CalendarAccount
         
-        console.print("[bold]Add Calendar Account[/bold]\n")
-        console.print("[bold]Supported Types:[/bold]")
-        console.print("  [cyan]gmail[/cyan]    - Google Calendar via CalDAV (simple, app password)")
-        console.print("  [cyan]icloud[/cyan]   - Apple iCloud Calendar")
-        console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
-        console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, or custom CalDAV")
-        console.print("  [cyan]google[/cyan]   - Google Calendar via API (complex, OAuth)\n")
-        
-        cal_type = Prompt.ask(
-            "Select calendar type",
-            choices=["gmail", "icloud", "exchange", "caldav", "google", "cancel"],
-            default="gmail"
-        )
-        
-        if cal_type == "cancel":
-            return
-        
-        # Ask for account name
-        default_name = {
-            "gmail": "Gmail Calendar",
-            "icloud": "iCloud Calendar", 
-            "exchange": "Work Calendar",
-            "caldav": "CalDAV Calendar",
-            "google": "Google Calendar"
-        }.get(cal_type, "My Calendar")
-        
-        name = Prompt.ask("Account name", default=default_name)
-        
-        # Create account based on type
-        account = CalendarAccount(name=name, type=cal_type, enabled=True)
+        # Use existing values as defaults if retrying
+        if existing_account:
+            console.print("\n[dim]Previous values will be used as defaults.[/dim]\n")
+            # Map internal type back to selection type
+            if existing_account.url and "google" in existing_account.url:
+                cal_type = "gmail"
+            elif existing_account.url and "icloud" in existing_account.url:
+                cal_type = "icloud"
+            elif existing_account.type == "exchange":
+                cal_type = "exchange"
+            elif existing_account.type == "google":
+                cal_type = "google"
+            else:
+                cal_type = "caldav"
+            account = existing_account
+        else:
+            console.print("[bold]Add Calendar Account[/bold]\n")
+            console.print("[bold]Supported Types:[/bold]")
+            console.print("  [cyan]gmail[/cyan]    - Google Calendar via CalDAV (simple, app password)")
+            console.print("  [cyan]icloud[/cyan]   - Apple iCloud Calendar")
+            console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
+            console.print("  [cyan]caldav[/cyan]   - Nextcloud, ownCloud, or custom CalDAV")
+            console.print("  [cyan]google[/cyan]   - Google Calendar via API (complex, OAuth)\n")
+            
+            cal_type = Prompt.ask(
+                "Select calendar type",
+                choices=["gmail", "icloud", "exchange", "caldav", "google", "cancel"],
+                default="gmail"
+            )
+            
+            if cal_type == "cancel":
+                return
+            
+            # Ask for account name
+            default_name = {
+                "gmail": "Gmail Calendar",
+                "icloud": "iCloud Calendar", 
+                "exchange": "Work Calendar",
+                "caldav": "CalDAV Calendar",
+                "google": "Google Calendar"
+            }.get(cal_type, "My Calendar")
+            
+            name = Prompt.ask("Account name", default=default_name)
+            
+            # Create account based on type
+            account = CalendarAccount(name=name, type=cal_type, enabled=True)
         
         if cal_type == "gmail":
             success = self._configure_gmail_calendar(account)
@@ -461,12 +477,15 @@ class SetupWizard:
             success = False
         
         if success:
-            self.config.integrations.calendar_accounts.append(account)
-            console.print(f"\n[green]✓[/green] Calendar account '{name}' added successfully!")
+            # Only add if not already in list (retry case)
+            if account not in self.config.integrations.calendar_accounts:
+                self.config.integrations.calendar_accounts.append(account)
+            console.print(f"\n[green]✓[/green] Calendar account '{account.name}' added successfully!")
         else:
-            if not Confirm.ask("Configuration failed. Try again?", default=True):
+            if not Confirm.ask("Configuration failed. Try again with same settings?", default=True):
                 return
-            self._add_calendar_account()
+            # Retry with same account (preserves entered values)
+            self._add_calendar_account(account)
     
     def _configure_gmail_calendar(self, account: "CalendarAccount") -> bool:
         """Configure Gmail CalDAV calendar."""
@@ -477,8 +496,9 @@ class SetupWizard:
         console.print("  2. Select 'Mail' and 'Other (Custom name)'")
         console.print("  3. Enter 'Koda' and copy the 16-character password\n")
         
-        email = Prompt.ask("Gmail address")
-        password = Prompt.ask("App password", password=True)
+        # Use existing values as defaults
+        email = Prompt.ask("Gmail address", default=account.email or "")
+        password = Prompt.ask("App password", password=True, default=account.password or "")
         
         account.type = "caldav"
         account.url = f"https://apidata.googleusercontent.com/caldav/v2/{email}/events"
@@ -503,8 +523,9 @@ class SetupWizard:
         console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
         console.print("  2. Sign in → App-Specific Passwords → Create\n")
         
-        email = Prompt.ask("Apple ID email")
-        password = Prompt.ask("App-Specific Password", password=True)
+        # Use existing values as defaults
+        email = Prompt.ask("Apple ID email", default=account.email or "")
+        password = Prompt.ask("App-Specific Password", password=True, default=account.password or "")
         
         account.type = "caldav"
         account.url = "https://caldav.icloud.com"
@@ -526,10 +547,11 @@ class SetupWizard:
         console.print("\n[bold]Exchange Calendar Setup[/bold]")
         console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
         
-        email = Prompt.ask("Email address")
-        username = Prompt.ask("Username (leave empty if same as email)", default="")
-        password = Prompt.ask("Password", password=True)
-        server = Prompt.ask("Server (e.g., outlook.office365.com)", default="outlook.office365.com")
+        # Use existing values as defaults
+        email = Prompt.ask("Email address", default=account.email or "")
+        username = Prompt.ask("Username (leave empty if same as email)", default=account.username or "")
+        password = Prompt.ask("Password", password=True, default=account.password or "")
+        server = Prompt.ask("Server (e.g., outlook.office365.com)", default=account.server or "outlook.office365.com")
         
         account.type = "exchange"
         account.email = email
@@ -556,9 +578,10 @@ class SetupWizard:
         console.print("  [cyan]Nextcloud:[/cyan] https://your-server/remote.php/dav")
         console.print("  [cyan]Radicale:[/cyan]  https://your-server/username/calendar.ics\n")
         
-        url = Prompt.ask("CalDAV URL")
-        username = Prompt.ask("Username")
-        password = Prompt.ask("Password", password=True)
+        # Use existing values as defaults
+        url = Prompt.ask("CalDAV URL", default=account.url or "")
+        username = Prompt.ask("Username", default=account.email or "")
+        password = Prompt.ask("Password", password=True, default=account.password or "")
         
         account.type = "caldav"
         account.url = url
@@ -913,38 +936,54 @@ class SetupWizard:
         # Add new account
         self._add_email_account()
     
-    def _add_email_account(self) -> None:
-        """Add a new email account."""
+    def _add_email_account(self, existing_account: "EmailAccount | None" = None) -> None:
+        """Add a new email account. If existing_account provided, use as defaults for retry."""
         from koda.config.schema import EmailAccount
         
-        console.print("[bold]Add Email Account[/bold]\n")
-        console.print("[bold]Supported Types:[/bold]")
-        console.print("  [cyan]gmail[/cyan]    - Gmail via IMAP (simple, app password)")
-        console.print("  [cyan]icloud[/cyan]   - iCloud Mail via IMAP")
-        console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
-        console.print("  [cyan]imap[/cyan]     - Any other email provider\n")
-        
-        email_type = Prompt.ask(
-            "Select email type",
-            choices=["gmail", "icloud", "exchange", "imap", "cancel"],
-            default="gmail"
-        )
-        
-        if email_type == "cancel":
-            return
-        
-        # Ask for account name
-        default_name = {
-            "gmail": "Gmail",
-            "icloud": "iCloud Mail",
-            "exchange": "Work Email",
-            "imap": "Email"
-        }.get(email_type, "My Email")
-        
-        name = Prompt.ask("Account name", default=default_name)
-        
-        # Create account based on type
-        account = EmailAccount(name=name, type=email_type, enabled=True)
+        # Use existing values as defaults if retrying
+        if existing_account:
+            console.print("\n[dim]Previous values will be used as defaults.[/dim]\n")
+            email_type = existing_account.type if existing_account.type != "imap" else "gmail"
+            # Map internal type back to selection type
+            if existing_account.host == "imap.gmail.com":
+                email_type = "gmail"
+            elif existing_account.host == "imap.mail.me.com":
+                email_type = "icloud"
+            elif existing_account.type == "exchange":
+                email_type = "exchange"
+            else:
+                email_type = "imap"
+            name = existing_account.name
+            account = existing_account
+        else:
+            console.print("[bold]Add Email Account[/bold]\n")
+            console.print("[bold]Supported Types:[/bold]")
+            console.print("  [cyan]gmail[/cyan]    - Gmail via IMAP (simple, app password)")
+            console.print("  [cyan]icloud[/cyan]   - iCloud Mail via IMAP")
+            console.print("  [cyan]exchange[/cyan] - Microsoft Exchange / Outlook 365")
+            console.print("  [cyan]imap[/cyan]     - Any other email provider\n")
+            
+            email_type = Prompt.ask(
+                "Select email type",
+                choices=["gmail", "icloud", "exchange", "imap", "cancel"],
+                default="gmail"
+            )
+            
+            if email_type == "cancel":
+                return
+            
+            # Ask for account name
+            default_name = {
+                "gmail": "Gmail",
+                "icloud": "iCloud Mail",
+                "exchange": "Work Email",
+                "imap": "Email"
+            }.get(email_type, "My Email")
+            
+            name = Prompt.ask("Account name", default=default_name)
+            
+            # Create account based on type
+            account = EmailAccount(name=name, type=email_type, enabled=True)
         
         if email_type == "gmail":
             success = self._configure_gmail_email(account)
@@ -958,12 +997,15 @@ class SetupWizard:
             success = False
         
         if success:
-            self.config.integrations.email_accounts.append(account)
-            console.print(f"\n[green]✓[/green] Email account '{name}' added successfully!")
+            # Only add if not already in list (retry case)
+            if account not in self.config.integrations.email_accounts:
+                self.config.integrations.email_accounts.append(account)
+            console.print(f"\n[green]✓[/green] Email account '{account.name}' added successfully!")
         else:
-            if not Confirm.ask("Configuration failed. Try again?", default=True):
+            if not Confirm.ask("Configuration failed. Try again with same settings?", default=True):
                 return
-            self._add_email_account()
+            # Retry with same account (preserves entered values)
+            self._add_email_account(account)
     
     def _configure_gmail_email(self, account: "EmailAccount") -> bool:
         """Configure Gmail via IMAP."""
@@ -974,8 +1016,9 @@ class SetupWizard:
         console.print("  2. Select 'Mail' and 'Other (Custom name)'")
         console.print("  3. Enter 'Koda' and copy the 16-character password\n")
         
-        email = Prompt.ask("Gmail address")
-        password = Prompt.ask("App password", password=True)
+        # Use existing values as defaults
+        email = Prompt.ask("Gmail address", default=account.email or "")
+        password = Prompt.ask("App password", password=True, default=account.password or "")
         
         account.type = "imap"
         account.host = "imap.gmail.com"
@@ -1002,8 +1045,9 @@ class SetupWizard:
         console.print("  1. Go to [cyan]https://appleid.apple.com/[/cyan]")
         console.print("  2. Sign in → App-Specific Passwords → Create\n")
         
-        email = Prompt.ask("Apple ID email")
-        password = Prompt.ask("App-Specific Password", password=True)
+        # Use existing values as defaults
+        email = Prompt.ask("Apple ID email", default=account.email or "")
+        password = Prompt.ask("App-Specific Password", password=True, default=account.password or "")
         
         account.type = "imap"
         account.host = "imap.mail.me.com"
@@ -1027,10 +1071,11 @@ class SetupWizard:
         console.print("\n[bold]Exchange Email Setup[/bold]")
         console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
         
-        email = Prompt.ask("Email address")
-        username = Prompt.ask("Username (leave empty if same as email)", default="")
-        password = Prompt.ask("Password", password=True)
-        server = Prompt.ask("Server (e.g., outlook.office365.com)", default="outlook.office365.com")
+        # Use existing values as defaults
+        email = Prompt.ask("Email address", default=account.email or "")
+        username = Prompt.ask("Username (leave empty if same as email)", default=account.username or "")
+        password = Prompt.ask("Password", password=True, default=account.password or "")
+        server = Prompt.ask("Server (e.g., outlook.office365.com)", default=account.server or "outlook.office365.com")
         
         account.type = "exchange"
         account.email = email
@@ -1056,10 +1101,11 @@ class SetupWizard:
         console.print("  [cyan]Outlook:[/cyan]    outlook.office365.com (port 993)")
         console.print("  [cyan]Yahoo:[/cyan]      imap.mail.yahoo.com (port 993)\n")
         
-        host = Prompt.ask("IMAP server")
-        port = int(Prompt.ask("Port", default="993"))
-        email = Prompt.ask("Email address")
-        password = Prompt.ask("Password", password=True)
+        # Use existing values as defaults
+        host = Prompt.ask("IMAP server", default=account.host or "")
+        port = int(Prompt.ask("Port", default=str(account.port) if account.port else "993"))
+        email = Prompt.ask("Email address", default=account.email or "")
+        password = Prompt.ask("Password", password=True, default=account.password or "")
         
         account.type = "imap"
         account.host = host
