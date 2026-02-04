@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import glob
+import os
+import sqlite3
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
@@ -14,8 +17,8 @@ class ICloudContactsClient:
     """
     Client for accessing iCloud Contacts.
     
-    On macOS, this uses the native Contacts database via AppleScript/sqlite
-    for local access, or pyicloud for remote access.
+    On macOS, this reads the native Contacts SQLite database directly
+    for fast local access, or pyicloud for remote access.
     """
     
     def __init__(
@@ -28,99 +31,82 @@ class ICloudContactsClient:
         self.password = password
         self.use_local = use_local
         self._api = None
+        self._db_paths = self._find_contacts_databases()
+    
+    def _find_contacts_databases(self) -> list[str]:
+        """Find all macOS Contacts database files."""
+        pattern = os.path.expanduser(
+            "~/Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb"
+        )
+        return glob.glob(pattern)
     
     def _get_local_contacts(self) -> list[dict[str, Any]]:
         """
-        Get contacts from macOS Contacts app via AppleScript.
-        This is the preferred method as it doesn't require iCloud credentials.
+        Get contacts from macOS Contacts SQLite database.
+        This is much faster than AppleScript for large contact lists.
         """
-        script = '''
-        tell application "Contacts"
-            set contactList to {}
-            repeat with p in people
-                set contactInfo to {|name|:name of p, |firstName|:first name of p, |lastName|:last name of p}
-                
-                -- Get birthday
-                try
-                    set bday to birth date of p
-                    if bday is not missing value then
-                        set contactInfo to contactInfo & {|birthday|:(bday as string)}
-                    end if
-                end try
-                
-                -- Get emails
-                set emailList to {}
-                repeat with e in emails of p
-                    set end of emailList to value of e
-                end repeat
-                set contactInfo to contactInfo & {|emails|:emailList}
-                
-                -- Get phones
-                set phoneList to {}
-                repeat with ph in phones of p
-                    set end of phoneList to value of ph
-                end repeat
-                set contactInfo to contactInfo & {|phones|:phoneList}
-                
-                -- Get company
-                try
-                    set org to organization of p
-                    if org is not missing value then
-                        set contactInfo to contactInfo & {|company|:org}
-                    end if
-                end try
-                
-                set end of contactList to contactInfo
-            end repeat
-            return contactList
-        end tell
-        '''
-        
-        try:
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"AppleScript error: {result.stderr}")
-                return []
-            
-            # Parse AppleScript output
-            return self._parse_applescript_output(result.stdout)
-            
-        except subprocess.TimeoutExpired:
-            logger.error("Timeout reading contacts")
-            return []
-        except Exception as e:
-            logger.error(f"Error reading local contacts: {e}")
-            return []
-    
-    def _parse_applescript_output(self, output: str) -> list[dict[str, Any]]:
-        """Parse AppleScript record output into Python dicts."""
         contacts = []
+        seen_names = set()
         
-        # AppleScript returns records in a specific format
-        # This is a simplified parser - for production, consider using JSON export
-        lines = output.strip().split("}, {")
-        
-        for line in lines:
-            contact = {}
-            line = line.replace("{", "").replace("}", "")
-            
-            # Parse key-value pairs
-            parts = line.split(", ")
-            for part in parts:
-                if ":" in part:
-                    key, value = part.split(":", 1)
-                    key = key.strip().replace("|", "")
-                    value = value.strip().strip('"')
-                    contact[key] = value
-            
-            if contact.get("name"):
-                contacts.append(contact)
+        for db_path in self._db_paths:
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                
+                # Query contacts with their details
+                cur.execute('''
+                    SELECT 
+                        ZFIRSTNAME as first_name,
+                        ZLASTNAME as last_name,
+                        ZORGANIZATION as company,
+                        ZBIRTHDAYYEAR as birth_year,
+                        ZBIRTHDAYYEARLESS as birth_yearless
+                    FROM ZABCDRECORD 
+                    WHERE ZFIRSTNAME IS NOT NULL OR ZLASTNAME IS NOT NULL
+                ''')
+                
+                for row in cur.fetchall():
+                    first_name = row['first_name'] or ''
+                    last_name = row['last_name'] or ''
+                    name = f"{first_name} {last_name}".strip()
+                    
+                    if not name or name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    
+                    # Parse birthday from CoreData timestamp
+                    birthday = None
+                    birth_yearless = row['birth_yearless']
+                    birth_year = row['birth_year']
+                    
+                    if birth_yearless is not None:
+                        try:
+                            # CoreData stores as seconds since 2001-01-01
+                            ref_date = datetime(2001, 1, 1)
+                            bday_date = datetime.fromtimestamp(ref_date.timestamp() + birth_yearless)
+                            if birth_year and birth_year > 1900:
+                                birthday = f"{birth_year}-{bday_date.month:02d}-{bday_date.day:02d}"
+                            else:
+                                birthday = f"{bday_date.month:02d}-{bday_date.day:02d}"
+                        except Exception:
+                            pass
+                    
+                    contacts.append({
+                        "name": name,
+                        "firstName": first_name,
+                        "lastName": last_name,
+                        "company": row['company'],
+                        "birthday": birthday,
+                        "emails": [],
+                        "phones": [],
+                    })
+                
+                conn.close()
+                
+            except Exception as e:
+                logger.debug(f"Error reading contacts from {db_path}: {e}")
+                continue
         
         return contacts
     
