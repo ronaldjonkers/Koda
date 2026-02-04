@@ -17,9 +17,7 @@ from koda.core.tools.shell import ExecTool
 from koda.core.tools.web import WebSearchTool, WebFetchTool, DuckDuckGoSearchTool, WikipediaSearchTool
 from koda.core.tools.message import MessageTool
 from koda.core.tools.spawn import SpawnTool
-from koda.core.tools.calendar import GoogleCalendarTool, ExchangeCalendarTool
 from koda.core.tools.unified_calendar import UnifiedCalendarTool
-from koda.core.tools.email import GmailTool, ExchangeEmailTool
 from koda.core.tools.unified_email import UnifiedEmailTool
 from koda.core.tools.accounts import AccountsTool
 from koda.core.tools.contacts import ContactsTool
@@ -159,13 +157,8 @@ class AgentLoop:
             default_reminder_phone=cal_cfg.get("default_reminder_phone", "")
         ))
         
-        # Individual calendar tools (for backward compatibility)
-        self.tools.register(GoogleCalendarTool())
-        self.tools.register(ExchangeCalendarTool())
-        
-        # Email tools (legacy)
-        self.tools.register(GmailTool())
-        self.tools.register(ExchangeEmailTool())
+        # Legacy individual calendar/email tools are NOT registered
+        # The unified calendar and email tools handle all account types
         
         # Unified email tool for email_accounts configuration
         self.tools.register(UnifiedEmailTool(config=full_config))
