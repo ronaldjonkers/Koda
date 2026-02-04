@@ -33,6 +33,7 @@ class WhatsAppChannel(BaseChannel):
     - Per-contact rules: Custom instructions per contact
     - Owner escalation: Forward important requests to owner
     - Full message visibility: View all incoming messages
+    - WhatsApp commands for configuration (/help, /addmail, /addcalendar, etc.)
     """
     
     name = "whatsapp"
@@ -51,6 +52,7 @@ class WhatsAppChannel(BaseChannel):
         self._ws = None
         self._connected = False
         self._contact_rules: dict[str, WhatsAppContactRule] = {}
+        self._setup_sessions: dict[str, dict] = {}  # Track step-by-step setup sessions
         self._load_contact_rules()
     
     async def start(self) -> None:
@@ -219,14 +221,6 @@ class WhatsAppChannel(BaseChannel):
     async def _handle_command(self, command: str, args: str, chat_id: str, phone: str) -> str | None:
         """
         Handle a WhatsApp command. Returns response text or None if not a command.
-        
-        Commands:
-        - /help - Show available commands
-        - /status - Show current configuration
-        - /name <name> - Set your name
-        - /assistant <name> - Set assistant name
-        - /language <code> - Set language (nl, en, de, fr, es)
-        - /style <style> - Set personality (professional, friendly, formal)
         """
         config = load_config()
         
@@ -236,22 +230,36 @@ class WhatsAppChannel(BaseChannel):
 *Informatie:*
 /help - Toon deze hulp
 /status - Toon huidige instellingen
+/accounts - Toon mail/agenda accounts
 
-*Instellingen:*
+*Basis instellingen:*
 /name <naam> - Stel je naam in
 /assistant <naam> - Stel assistant naam in
 /language <code> - Stel taal in (nl, en, de, fr, es)
 /style <stijl> - Stel stijl in (professional, friendly, formal)
 
-*Voorbeeld:*
-`/name Ronald`
-`/language nl`"""
+*Accounts toevoegen:*
+/addmail - Voeg email account toe (stap voor stap)
+/addmail json - Voeg email toe via JSON
+/addcalendar - Voeg agenda account toe (stap voor stap)
+/addcalendar json - Voeg agenda toe via JSON
+
+*Accounts verwijderen:*
+/removemail <naam> - Verwijder email account
+/removecalendar <naam> - Verwijder agenda account
+
+*Setup annuleren:*
+/cancel - Annuleer lopende setup"""
 
         elif command == "/status":
             assistant = config.assistant
             wa = config.channels.whatsapp
             mode = "Bot Mode (iedereen)" if wa.bot_mode else "Restricted Mode"
             allowed = ", ".join(wa.allow_from) if wa.allow_from else "niemand"
+            
+            # Count accounts
+            email_count = len(config.integrations.email_accounts) if hasattr(config.integrations, 'email_accounts') else 0
+            cal_count = len(config.integrations.calendar_accounts) if hasattr(config.integrations, 'calendar_accounts') else 0
             
             return f"""⚙️ *Huidige instellingen:*
 
@@ -264,10 +272,18 @@ class WhatsAppChannel(BaseChannel):
 *WhatsApp:*
 • Modus: {mode}
 • Toegestaan: {allowed}
-• Owner: {wa.owner_name or wa.owner_phone or '(niet ingesteld)'}
 
-*Model:* {config.agents.defaults.model}"""
+*Accounts:*
+• Email accounts: {email_count}
+• Agenda accounts: {cal_count}
 
+*Model:* {config.agents.defaults.model}
+
+_Gebruik /accounts voor details_"""
+
+        elif command == "/accounts":
+            return self._format_accounts(config)
+        
         elif command == "/name":
             if not args:
                 return "❌ Gebruik: `/name <jouw naam>`\nVoorbeeld: `/name Ronald`"
@@ -299,7 +315,393 @@ class WhatsAppChannel(BaseChannel):
             save_config(config)
             return f"✅ Stijl ingesteld op: *{args.lower()}*"
         
+        elif command == "/addmail":
+            if args.lower() == "json":
+                return self._start_json_setup(phone, "email")
+            return self._start_email_setup(phone)
+        
+        elif command == "/addcalendar":
+            if args.lower() == "json":
+                return self._start_json_setup(phone, "calendar")
+            return self._start_calendar_setup(phone)
+        
+        elif command == "/removemail":
+            if not args:
+                return "❌ Gebruik: `/removemail <naam>`\nGebruik /accounts om namen te zien."
+            return self._remove_account(config, "email", args)
+        
+        elif command == "/removecalendar":
+            if not args:
+                return "❌ Gebruik: `/removecalendar <naam>`\nGebruik /accounts om namen te zien."
+            return self._remove_account(config, "calendar", args)
+        
+        elif command == "/cancel":
+            if phone in self._setup_sessions:
+                del self._setup_sessions[phone]
+                return "✅ Setup geannuleerd."
+            return "ℹ️ Geen actieve setup om te annuleren."
+        
         return None  # Not a recognized command
+    
+    def _format_accounts(self, config) -> str:
+        """Format configured accounts for display."""
+        lines = ["📧 *Geconfigureerde Accounts:*\n"]
+        
+        # Email accounts
+        email_accounts = getattr(config.integrations, 'email_accounts', []) or []
+        if email_accounts:
+            lines.append("*Email:*")
+            for acc in email_accounts:
+                name = acc.get('name', 'unnamed')
+                acc_type = acc.get('type', 'unknown')
+                email = acc.get('email', acc.get('username', ''))
+                lines.append(f"• {name} ({acc_type}): {email}")
+        else:
+            lines.append("*Email:* Geen accounts geconfigureerd")
+        
+        lines.append("")
+        
+        # Calendar accounts
+        cal_accounts = getattr(config.integrations, 'calendar_accounts', []) or []
+        if cal_accounts:
+            lines.append("*Agenda:*")
+            for acc in cal_accounts:
+                name = acc.get('name', 'unnamed')
+                acc_type = acc.get('type', 'unknown')
+                lines.append(f"• {name} ({acc_type})")
+        else:
+            # Check legacy config
+            legacy = []
+            if config.integrations.exchange.enabled:
+                legacy.append(f"• Exchange: {config.integrations.exchange.email}")
+            if config.integrations.google.enabled:
+                legacy.append("• Google Calendar")
+            if config.integrations.caldav.enabled:
+                legacy.append(f"• CalDAV: {config.integrations.caldav.url}")
+            
+            if legacy:
+                lines.append("*Agenda:*")
+                lines.extend(legacy)
+            else:
+                lines.append("*Agenda:* Geen accounts geconfigureerd")
+        
+        lines.append("\n_Gebruik /addmail of /addcalendar om toe te voegen_")
+        return "\n".join(lines)
+    
+    def _start_email_setup(self, phone: str) -> str:
+        """Start step-by-step email setup."""
+        self._setup_sessions[phone] = {
+            "type": "email",
+            "step": 1,
+            "data": {}
+        }
+        return """📧 *Email Account Setup*
+
+Stap 1/5: Welk type email?
+1️⃣ Exchange/Office 365
+2️⃣ IMAP (Gmail, etc.)
+
+Stuur het nummer (1 of 2) of /cancel om te stoppen."""
+    
+    def _start_calendar_setup(self, phone: str) -> str:
+        """Start step-by-step calendar setup."""
+        self._setup_sessions[phone] = {
+            "type": "calendar",
+            "step": 1,
+            "data": {}
+        }
+        return """📅 *Agenda Account Setup*
+
+Stap 1/4: Welk type agenda?
+1️⃣ Exchange/Office 365
+2️⃣ Google Calendar
+3️⃣ CalDAV (iCloud, Nextcloud, etc.)
+
+Stuur het nummer (1, 2 of 3) of /cancel om te stoppen."""
+    
+    def _start_json_setup(self, phone: str, account_type: str) -> str:
+        """Start JSON-based setup."""
+        self._setup_sessions[phone] = {
+            "type": f"{account_type}_json",
+            "step": 1,
+            "data": {}
+        }
+        
+        if account_type == "email":
+            return """📧 *Email Account Setup (JSON)*
+
+Stuur een JSON object met de volgende velden:
+
+*Exchange:*
+```
+{
+  "type": "exchange",
+  "name": "Werk",
+  "email": "je@bedrijf.com",
+  "password": "wachtwoord",
+  "server": "outlook.office365.com"
+}
+```
+
+*IMAP:*
+```
+{
+  "type": "imap",
+  "name": "Gmail",
+  "host": "imap.gmail.com",
+  "port": 993,
+  "username": "je@gmail.com",
+  "password": "app-wachtwoord"
+}
+```
+
+Of /cancel om te stoppen."""
+        else:
+            return """📅 *Agenda Account Setup (JSON)*
+
+Stuur een JSON object met de volgende velden:
+
+*Exchange:*
+```
+{
+  "type": "exchange",
+  "name": "Werk",
+  "email": "je@bedrijf.com",
+  "password": "wachtwoord",
+  "server": "outlook.office365.com"
+}
+```
+
+*CalDAV:*
+```
+{
+  "type": "caldav",
+  "name": "iCloud",
+  "url": "https://caldav.icloud.com",
+  "username": "je@icloud.com",
+  "password": "app-wachtwoord"
+}
+```
+
+Of /cancel om te stoppen."""
+    
+    async def _handle_setup_response(self, phone: str, content: str, chat_id: str) -> str | None:
+        """Handle a response in an active setup session."""
+        if phone not in self._setup_sessions:
+            return None
+        
+        session = self._setup_sessions[phone]
+        setup_type = session["type"]
+        step = session["step"]
+        data = session["data"]
+        
+        # Handle JSON setup
+        if setup_type.endswith("_json"):
+            try:
+                json_data = json.loads(content)
+                account_type = setup_type.replace("_json", "")
+                result = self._save_account_from_json(account_type, json_data)
+                del self._setup_sessions[phone]
+                return result
+            except json.JSONDecodeError:
+                return "❌ Ongeldige JSON. Probeer opnieuw of /cancel."
+        
+        # Handle step-by-step email setup
+        if setup_type == "email":
+            return await self._handle_email_setup_step(phone, content, step, data)
+        
+        # Handle step-by-step calendar setup
+        if setup_type == "calendar":
+            return await self._handle_calendar_setup_step(phone, content, step, data)
+        
+        return None
+    
+    async def _handle_email_setup_step(self, phone: str, content: str, step: int, data: dict) -> str:
+        """Handle email setup steps."""
+        session = self._setup_sessions[phone]
+        
+        if step == 1:  # Type selection
+            if content == "1":
+                data["type"] = "exchange"
+                session["step"] = 2
+                return "Stap 2/5: Wat is je email adres?"
+            elif content == "2":
+                data["type"] = "imap"
+                session["step"] = 2
+                return "Stap 2/5: Wat is de IMAP server? (bijv. imap.gmail.com)"
+            else:
+                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+        
+        elif step == 2:
+            if data["type"] == "exchange":
+                data["email"] = content
+                session["step"] = 3
+                return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
+            else:  # imap
+                data["host"] = content
+                session["step"] = 3
+                return "Stap 3/5: Wat is je gebruikersnaam/email?"
+        
+        elif step == 3:
+            if data["type"] == "exchange":
+                data["password"] = content
+                session["step"] = 4
+                return "Stap 4/5: Wat is de server? (bijv. outlook.office365.com)\nOf stuur 'auto' voor autodiscover."
+            else:  # imap
+                data["username"] = content
+                session["step"] = 4
+                return "Stap 4/5: Wat is je wachtwoord? (of app-wachtwoord)"
+        
+        elif step == 4:
+            if data["type"] == "exchange":
+                data["server"] = content if content.lower() != "auto" else ""
+                session["step"] = 5
+                return "Stap 5/5: Geef dit account een naam (bijv. 'Werk' of 'Persoonlijk'):"
+            else:  # imap
+                data["password"] = content
+                session["step"] = 5
+                return "Stap 5/5: Geef dit account een naam (bijv. 'Gmail' of 'Werk'):"
+        
+        elif step == 5:
+            data["name"] = content
+            result = self._save_account_from_json("email", data)
+            del self._setup_sessions[phone]
+            return result
+        
+        return None
+    
+    async def _handle_calendar_setup_step(self, phone: str, content: str, step: int, data: dict) -> str:
+        """Handle calendar setup steps."""
+        session = self._setup_sessions[phone]
+        
+        if step == 1:  # Type selection
+            if content == "1":
+                data["type"] = "exchange"
+                session["step"] = 2
+                return "Stap 2/4: Wat is je email adres?"
+            elif content == "2":
+                data["type"] = "google"
+                session["step"] = 2
+                return """Stap 2/4: Google Calendar Setup
+
+Google Calendar vereist OAuth authenticatie.
+Run dit commando in je terminal:
+`koda setup --section calendar`
+
+Of gebruik CalDAV met een app-wachtwoord.
+/cancel om te stoppen."""
+            elif content == "3":
+                data["type"] = "caldav"
+                session["step"] = 2
+                return "Stap 2/4: Wat is de CalDAV URL?\n(bijv. https://caldav.icloud.com)"
+            else:
+                return "❌ Kies 1, 2 of 3, of /cancel om te stoppen."
+        
+        elif step == 2:
+            if data["type"] == "exchange":
+                data["email"] = content
+                session["step"] = 3
+                return "Stap 3/4: Wat is je wachtwoord? (of app-wachtwoord)"
+            else:  # caldav
+                data["url"] = content
+                session["step"] = 3
+                return "Stap 3/4: Wat is je gebruikersnaam?"
+        
+        elif step == 3:
+            if data["type"] == "exchange":
+                data["password"] = content
+                session["step"] = 4
+                return "Stap 4/4: Geef dit account een naam (bijv. 'Werk'):"
+            else:  # caldav
+                data["username"] = content
+                session["step"] = 4
+                return "Stap 3b/4: Wat is je wachtwoord? (of app-wachtwoord)"
+        
+        elif step == 4:
+            if data["type"] == "exchange":
+                data["name"] = content
+                result = self._save_account_from_json("calendar", data)
+                del self._setup_sessions[phone]
+                return result
+            else:  # caldav - this is password step
+                data["password"] = content
+                session["step"] = 5
+                return "Stap 4/4: Geef dit account een naam:"
+        
+        elif step == 5:  # caldav name
+            data["name"] = content
+            result = self._save_account_from_json("calendar", data)
+            del self._setup_sessions[phone]
+            return result
+        
+        return None
+    
+    def _save_account_from_json(self, account_type: str, data: dict) -> str:
+        """Save account from JSON data."""
+        config = load_config()
+        
+        try:
+            name = data.get("name", "Account")
+            acc_type = data.get("type", "unknown")
+            
+            if account_type == "email":
+                # Ensure email_accounts list exists
+                if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
+                    config.integrations.email_accounts = []
+                
+                account = {
+                    "name": name,
+                    "type": acc_type,
+                    "enabled": True,
+                    **data
+                }
+                config.integrations.email_accounts.append(account)
+                save_config(config)
+                return f"✅ Email account *{name}* ({acc_type}) toegevoegd!"
+            
+            else:  # calendar
+                # Ensure calendar_accounts list exists
+                if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
+                    config.integrations.calendar_accounts = []
+                
+                account = {
+                    "name": name,
+                    "type": acc_type,
+                    "enabled": True,
+                    **data
+                }
+                config.integrations.calendar_accounts.append(account)
+                save_config(config)
+                return f"✅ Agenda account *{name}* ({acc_type}) toegevoegd!"
+        
+        except Exception as e:
+            logger.error(f"Error saving account: {e}")
+            return f"❌ Fout bij opslaan: {e}"
+    
+    def _remove_account(self, config, account_type: str, name: str) -> str:
+        """Remove an account by name."""
+        try:
+            if account_type == "email":
+                accounts = getattr(config.integrations, 'email_accounts', []) or []
+                new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
+                if len(new_accounts) == len(accounts):
+                    return f"❌ Email account '{name}' niet gevonden."
+                config.integrations.email_accounts = new_accounts
+                save_config(config)
+                return f"✅ Email account *{name}* verwijderd."
+            
+            else:  # calendar
+                accounts = getattr(config.integrations, 'calendar_accounts', []) or []
+                new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
+                if len(new_accounts) == len(accounts):
+                    return f"❌ Agenda account '{name}' niet gevonden."
+                config.integrations.calendar_accounts = new_accounts
+                save_config(config)
+                return f"✅ Agenda account *{name}* verwijderd."
+        
+        except Exception as e:
+            logger.error(f"Error removing account: {e}")
+            return f"❌ Fout bij verwijderen: {e}"
     
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -322,6 +724,18 @@ class WhatsAppChannel(BaseChannel):
             
             # Log incoming message
             logger.info(f"📥 WhatsApp message from +{phone}: {content[:100]}{'...' if len(content) > 100 else ''}")
+            
+            # Check for active setup session first
+            if phone in self._setup_sessions and self.is_allowed(phone):
+                response = await self._handle_setup_response(phone, content, sender)
+                if response:
+                    logger.info(f"📤 Sending setup response to +{phone}")
+                    await self.send(OutboundMessage(
+                        channel="whatsapp",
+                        chat_id=sender,
+                        content=response
+                    ))
+                    return  # Don't process as regular message
             
             # Check for commands (only from allowed users)
             if content.startswith("/") and self.is_allowed(phone):
