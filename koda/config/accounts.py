@@ -15,7 +15,6 @@ from typing import Any
 from loguru import logger
 
 from koda.config.loader import load_config, save_config
-from koda.config.schema import Account
 
 
 class AccountManager:
@@ -67,6 +66,10 @@ class AccountManager:
         account_data["capabilities"] = capabilities
         account_data["enabled"] = True
         
+        # Create proper Account model instance
+        from koda.config.schema import Account
+        account = Account(**account_data)
+        
         # Initialize accounts list if needed
         if not hasattr(self.config.integrations, 'accounts') or self.config.integrations.accounts is None:
             self.config.integrations.accounts = []
@@ -76,11 +79,11 @@ class AccountManager:
         
         if existing_idx is not None:
             # Update existing
-            self.config.integrations.accounts[existing_idx] = account_data
+            self.config.integrations.accounts[existing_idx] = account
             action = "updated"
         else:
             # Add new
-            self.config.integrations.accounts.append(account_data)
+            self.config.integrations.accounts.append(account)
             action = "added"
         
         save_config(self.config)

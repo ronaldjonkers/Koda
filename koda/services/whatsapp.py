@@ -376,43 +376,30 @@ Example: `/addbrave BSA1234567890abcdef`"""
         """Format configured accounts for display."""
         lines = ["📧 *Configured Accounts:*\n"]
         
-        # Email accounts
-        email_accounts = getattr(config.integrations, 'email_accounts', []) or []
-        if email_accounts:
-            lines.append("*Email:*")
-            for acc in email_accounts:
-                name = acc.get('name', 'unnamed')
-                acc_type = acc.get('type', 'unknown')
-                email = acc.get('email', acc.get('username', ''))
-                lines.append(f"• {name} ({acc_type}): {email}")
-        else:
-            lines.append("*Email:* No accounts configured")
+        # Get unified accounts
+        accounts = getattr(config.integrations, 'accounts', []) or []
         
-        lines.append("")
-        
-        # Calendar accounts
-        cal_accounts = getattr(config.integrations, 'calendar_accounts', []) or []
-        if cal_accounts:
-            lines.append("*Calendar:*")
-            for acc in cal_accounts:
-                name = acc.get('name', 'unnamed')
-                acc_type = acc.get('type', 'unknown')
-                lines.append(f"• {name} ({acc_type})")
+        if accounts:
+            for acc in accounts:
+                # Handle both dict and Pydantic model
+                if hasattr(acc, 'name'):
+                    name = acc.name
+                    acc_type = acc.type
+                    email = acc.email or acc.username or ""
+                    caps = acc.capabilities or []
+                else:
+                    name = acc.get('name', 'unnamed')
+                    acc_type = acc.get('type', 'unknown')
+                    email = acc.get('email', acc.get('username', ''))
+                    caps = acc.get('capabilities', [])
+                
+                caps_str = ", ".join(caps) if caps else acc_type
+                lines.append(f"• *{name}* ({acc_type})")
+                lines.append(f"  📧 {email}")
+                lines.append(f"  🔧 {caps_str}")
+                lines.append("")
         else:
-            # Check legacy config
-            legacy = []
-            if config.integrations.exchange.enabled:
-                legacy.append(f"• Exchange: {config.integrations.exchange.email}")
-            if config.integrations.google.enabled:
-                legacy.append("• Google Calendar")
-            if config.integrations.caldav.enabled:
-                legacy.append(f"• CalDAV: {config.integrations.caldav.url}")
-            
-            if legacy:
-                lines.append("*Calendar:*")
-                lines.extend(legacy)
-            else:
-                lines.append("*Calendar:* No accounts configured")
+            lines.append("No accounts configured yet.")
         
         lines.append("")
         
@@ -460,19 +447,10 @@ Step 1/2: Enter your LinkedIn email address:
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""
         try:
-            # Notify via message bus if available
-            if self.bus:
-                # Publish reload event so other services can pick it up
-                from koda.messaging.events import SystemEvent
-                try:
-                    await self.bus.publish(SystemEvent(
-                        type="config_reload",
-                        data={"source": "whatsapp"}
-                    ))
-                except Exception:
-                    pass  # Bus might not support SystemEvent yet
-            
-            logger.info("Configuration auto-reloaded after account change")
+            # Reload config from file
+            from koda.config.loader import load_config
+            self.config = load_config()
+            logger.info("Configuration reloaded after account change")
         except Exception as e:
             logger.error(f"Error auto-reloading config: {e}")
     
