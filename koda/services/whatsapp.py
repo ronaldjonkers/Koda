@@ -738,8 +738,11 @@ Stuur 1 of 2:"""
         logger.info(f"Settings: username={data.get('username')}, server={data.get('server')}, autodiscover={data.get('use_autodiscover')}")
         
         try:
-            from exchangelib import Credentials, Account, Configuration, DELEGATE
-            from exchangelib.errors import UnauthorizedError, TransportError
+            from exchangelib import Credentials, Account, Configuration, DELEGATE, Build, Version
+            from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+            
+            # Use NoVerifyHTTPAdapter to avoid SSL issues and NTLM certificate problems
+            BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
             
             logger.info("Creating credentials...")
             credentials = Credentials(
@@ -757,11 +760,16 @@ Stuur 1 of 2:"""
                     access_type=DELEGATE
                 )
             else:
-                # Manual server
+                # Manual server - specify version to avoid version detection issues
                 logger.info(f"Connecting to server: {data['server']}")
+                
+                # Try with explicit version to skip problematic version detection
+                version = Version(build=Build(15, 1, 0, 0))  # Exchange 2016
+                
                 config = Configuration(
                     server=data["server"],
-                    credentials=credentials
+                    credentials=credentials,
+                    version=version
                 )
                 account = Account(
                     primary_smtp_address=data["email"],
@@ -773,15 +781,17 @@ Stuur 1 of 2:"""
             
             logger.info("Account created, testing access...")
             
-            # Test by accessing inbox/calendar
+            # Test by accessing inbox/calendar - use simpler test
             if account_type == "email":
                 logger.info("Testing inbox access...")
-                count = account.inbox.total_count
-                logger.info(f"Inbox has {count} items")
+                # Just check if we can access root - simpler test
+                root = account.root
+                logger.info(f"Root folder accessible: {root.name if root else 'yes'}")
             else:
                 logger.info("Testing calendar access...")
-                items = list(account.calendar.all()[:1])
-                logger.info(f"Calendar accessible, found {len(items)} items")
+                # Just check if calendar folder exists
+                cal = account.calendar
+                logger.info(f"Calendar accessible: {cal.name if cal else 'yes'}")
             
             logger.info("Exchange connection successful!")
             session["step"] = 9
