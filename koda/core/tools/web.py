@@ -166,10 +166,14 @@ class DuckDuckGoSearchTool(Tool):
         logger.info(f"🦆 ddg_search called with query: '{query}'")
         
         try:
-            from duckduckgo_search import DDGS
+            # Try new package name first (ddgs), fall back to old name
+            try:
+                from ddgs import DDGS
+            except ImportError:
+                from duckduckgo_search import DDGS
         except ImportError:
-            logger.error("ddg_search failed: duckduckgo-search not installed")
-            return "Error: duckduckgo-search not installed. Run: pip install duckduckgo-search"
+            logger.error("ddg_search failed: ddgs not installed")
+            return "Error: ddgs not installed. Run: pip install ddgs"
         
         try:
             n = min(max(count or self.max_results, 1), 10)
@@ -179,8 +183,8 @@ class DuckDuckGoSearchTool(Tool):
             loop = asyncio.get_event_loop()
             
             def do_search():
-                with DDGS() as ddgs:
-                    return list(ddgs.text(query, max_results=n))
+                ddgs = DDGS()
+                return list(ddgs.text(query, max_results=n))
             
             logger.debug(f"Calling DuckDuckGo for '{query}' (count={n})")
             results = await loop.run_in_executor(None, do_search)

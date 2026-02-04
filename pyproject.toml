@@ -54,8 +54,12 @@ dependencies = [
     "caldav>=1.3.0",
     "icalendar>=5.0.0",
     # Web search and content extraction
-    "duckduckgo-search>=4.0.0",  # Free search, no API key needed
+    "ddgs>=6.0.0",               # DuckDuckGo search (renamed from duckduckgo-search)
     "trafilatura>=1.6.0",        # Better content extraction than readability
+    # Browser automation
+    "playwright>=1.40.0",        # For web automation, form filling, purchases
+    # Weather
+    "python-weather>=2.0.0",     # Weather forecasts
 ]
 
 [project.optional-dependencies]

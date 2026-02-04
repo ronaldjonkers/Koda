@@ -491,6 +491,24 @@ server {{
 
 
 # ============================================================================
+# Dashboard
+# ============================================================================
+
+
+@app.command()
+def dashboard(
+    port: int = typer.Option(8081, "--port", "-p", help="Dashboard port"),
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+):
+    """Start the web dashboard for configuration."""
+    from koda.dashboard import run_dashboard
+    
+    console.print(f"[green]🐕 Koda Dashboard starting...[/green]")
+    console.print(f"[dim]Open http://localhost:{port} in your browser[/dim]")
+    run_dashboard(host=host, port=port)
+
+
+# ============================================================================
 # Gateway / Server
 # ============================================================================
 

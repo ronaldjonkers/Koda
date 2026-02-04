@@ -26,6 +26,11 @@ from koda.core.tools.script import ScriptTool
 from koda.core.tools.schedule import ScheduleTool
 from koda.core.tools.plugin import PluginTool, PluginWrapperTool
 from koda.core.tools.linkedin import LinkedInTool
+from koda.core.tools.weather import WeatherTool
+from koda.core.tools.browser import BrowserTool
+from koda.core.tools.apple import AppleNotesTool, AppleRemindersTool
+from koda.core.tools.smarthome import PhilipsHueTool
+from koda.core.tools.onepassword import OnePasswordTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -195,6 +200,26 @@ class AgentLoop:
             password=linkedin_cfg.get("password", ""),
             enabled=linkedin_cfg.get("enabled", False)
         ))
+        
+        # Weather tool
+        self.tools.register(WeatherTool())
+        
+        # Browser automation tool (Playwright)
+        self.tools.register(BrowserTool())
+        
+        # Apple integrations (macOS only)
+        self.tools.register(AppleNotesTool())
+        self.tools.register(AppleRemindersTool())
+        
+        # Smart Home - Philips Hue
+        hue_cfg = self.calendar_config.get("hue", {})
+        self.tools.register(PhilipsHueTool(
+            bridge_ip=hue_cfg.get("bridge_ip"),
+            username=hue_cfg.get("username")
+        ))
+        
+        # 1Password integration
+        self.tools.register(OnePasswordTool())
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""
