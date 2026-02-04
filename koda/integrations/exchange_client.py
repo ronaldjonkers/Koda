@@ -95,10 +95,11 @@ class ExchangeClient:
         # Try multiple connection methods with fallbacks
         errors = []
         
-        # Method 1: If server is specified and autodiscover is disabled, try direct connection
-        if self.server and not self.use_autodiscover:
+        # Method 1: If server is specified, ALWAYS try direct connection first
+        # This takes priority over autodiscover
+        if self.server:
             try:
-                logger.debug(f"Trying direct connection to {self.server}...")
+                logger.info(f"Trying direct connection to {self.server}...")
                 config_kwargs = {
                     "server": self.server,
                     "credentials": credentials,
@@ -116,28 +117,30 @@ class ExchangeClient:
                 logger.info(f"Connected to Exchange via direct connection: {self.server}")
                 return self._account
             except Exception as e:
-                errors.append(f"Direct connection failed: {str(e)[:100]}")
-                logger.debug(f"Direct connection failed: {e}")
+                errors.append(f"Direct connection to {self.server} failed: {str(e)[:100]}")
+                logger.warning(f"Direct connection to {self.server} failed: {e}")
         
-        # Method 2: Try autodiscover (always try this as fallback or primary)
-        try:
-            logger.debug(f"Trying autodiscover for {self.email}...")
-            self._account = Account(
-                self.email,
-                credentials=credentials,
-                autodiscover=True,
-                access_type=DELEGATE
-            )
-            logger.info(f"Connected to Exchange via autodiscover")
-            return self._account
-        except Exception as e:
-            errors.append(f"Autodiscover failed: {str(e)[:100]}")
-            logger.debug(f"Autodiscover failed: {e}")
-        
-        # Method 3: Try common Office 365 server if autodiscover failed
-        if not self._account:
+        # Method 2: Try autodiscover (only if enabled or no server specified)
+        if self.use_autodiscover or not self.server:
             try:
-                logger.debug("Trying Office 365 endpoint as fallback...")
+                logger.info(f"Trying autodiscover for {self.email}...")
+                self._account = Account(
+                    self.email,
+                    credentials=credentials,
+                    autodiscover=True,
+                    access_type=DELEGATE
+                )
+                logger.info(f"Connected to Exchange via autodiscover")
+                return self._account
+            except Exception as e:
+                errors.append(f"Autodiscover failed: {str(e)[:100]}")
+                logger.warning(f"Autodiscover failed: {e}")
+        
+        # Method 3: Try Office 365 as last resort ONLY if no server was specified
+        # (Don't try O365 if user specified their own server - they know what they want)
+        if not self.server:
+            try:
+                logger.info("Trying Office 365 endpoint as fallback...")
                 config = Configuration(
                     server="outlook.office365.com",
                     credentials=credentials,
@@ -152,7 +155,7 @@ class ExchangeClient:
                 return self._account
             except Exception as e:
                 errors.append(f"Office 365 fallback failed: {str(e)[:100]}")
-                logger.debug(f"Office 365 fallback failed: {e}")
+                logger.warning(f"Office 365 fallback failed: {e}")
         
         # All methods failed
         error_summary = "; ".join(errors)
