@@ -188,14 +188,13 @@ class AgentLoop:
         self.plugin_loader = PluginLoader()
         self._load_plugins()
         
-        # LinkedIn tool
+        # LinkedIn tool - always register, it loads config dynamically
         linkedin_cfg = self.calendar_config.get("linkedin", {})
-        if linkedin_cfg.get("enabled"):
-            self.tools.register(LinkedInTool(
-                email=linkedin_cfg.get("email", ""),
-                password=linkedin_cfg.get("password", ""),
-                enabled=True
-            ))
+        self.tools.register(LinkedInTool(
+            email=linkedin_cfg.get("email", ""),
+            password=linkedin_cfg.get("password", ""),
+            enabled=linkedin_cfg.get("enabled", False)
+        ))
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""

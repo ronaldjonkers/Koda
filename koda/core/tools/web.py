@@ -44,6 +44,19 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _get_brave_api_key() -> str:
+    """Get Brave API key from config (reloads each time)."""
+    try:
+        from koda.config.loader import load_config
+        config = load_config()
+        key = getattr(config.tools.web.search, 'api_key', '') or ''
+        if key:
+            return key
+    except Exception:
+        pass
+    return os.environ.get("BRAVE_API_KEY", "")
+
+
 class WebSearchTool(Tool):
     """Search the web using Brave Search API."""
     
@@ -59,21 +72,25 @@ class WebSearchTool(Tool):
     }
     
     def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
+        self._initial_api_key = api_key
         self.max_results = max_results
-        # Log API key status for debugging
-        from loguru import logger
-        if self.api_key:
-            logger.debug(f"WebSearchTool initialized with API key: {self.api_key[:10]}...")
-        else:
-            logger.warning("WebSearchTool: No Brave API key configured - web_search will not work")
+    
+    def _get_api_key(self) -> str:
+        """Get API key - checks config each time for dynamic reload."""
+        # First try dynamic config
+        key = _get_brave_api_key()
+        if key:
+            return key
+        # Fall back to initial value
+        return self._initial_api_key or ""
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         from loguru import logger
         
         logger.info(f"🔍 web_search called with query: '{query}'")
         
-        if not self.api_key:
+        api_key = self._get_api_key()
+        if not api_key:
             logger.error("web_search failed: BRAVE_API_KEY not configured")
             return "Error: BRAVE_API_KEY not configured. Use DuckDuckGo search (ddg_search) instead, or configure Brave API key in ~/.koda/config.json under tools.web.search.api_key"
         
@@ -85,7 +102,7 @@ class WebSearchTool(Tool):
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
                     timeout=10.0
                 )
                 

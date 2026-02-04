@@ -1,10 +1,26 @@
 """LinkedIn tool for the agent."""
+from __future__ import annotations
 
 import json
 from typing import Any, Optional
 
 from koda.core.tools.base import Tool
 from koda.integrations.linkedin_client import LinkedInClient
+
+
+def _load_linkedin_config() -> dict:
+    """Load LinkedIn config from file at runtime."""
+    try:
+        from koda.config.loader import load_config
+        config = load_config()
+        li = config.integrations.linkedin
+        return {
+            "enabled": li.enabled,
+            "email": li.email,
+            "password": li.password
+        }
+    except Exception:
+        return {"enabled": False, "email": "", "password": ""}
 
 
 class LinkedInTool(Tool):
@@ -17,6 +33,8 @@ class LinkedInTool(Tool):
     - View and interact with posts
     - Create posts
     - Search for people
+    
+    If LinkedIn is not configured, this tool helps the user set it up.
     """
     
     name = "linkedin"
@@ -119,26 +137,49 @@ Actions:
         password: Optional[str] = None,
         enabled: bool = False
     ):
-        self.email = email
-        self.password = password
-        self.enabled = enabled
+        # Initial values (can be overridden by dynamic config)
+        self._initial_email = email
+        self._initial_password = password
+        self._initial_enabled = enabled
         self._client: Optional[LinkedInClient] = None
+    
+    def _get_config(self) -> dict:
+        """Get current LinkedIn config (reloads from file each time)."""
+        cfg = _load_linkedin_config()
+        # Use dynamic config if available, otherwise fall back to init values
+        if cfg.get("enabled"):
+            return cfg
+        elif self._initial_enabled:
+            return {
+                "enabled": self._initial_enabled,
+                "email": self._initial_email,
+                "password": self._initial_password
+            }
+        return cfg
     
     def _get_client(self) -> LinkedInClient:
         """Get or create LinkedIn client."""
-        if not self.enabled or not self.email or not self.password:
-            raise ValueError("LinkedIn is not configured. Run 'koda config linkedin' first.")
+        cfg = self._get_config()
+        if not cfg.get("enabled") or not cfg.get("email") or not cfg.get("password"):
+            raise ValueError("LinkedIn is not configured")
         
-        if self._client is None:
+        # Recreate client if credentials changed
+        if self._client is None or self._client.email != cfg["email"]:
             self._client = LinkedInClient(
-                email=self.email,
-                password=self.password
+                email=cfg["email"],
+                password=cfg["password"]
             )
         return self._client
     
     async def execute(self, action: str, **kwargs: Any) -> str:
-        if not self.enabled:
-            return json.dumps({"error": "LinkedIn integration is not enabled. Run 'koda config linkedin' to set it up."})
+        cfg = self._get_config()
+        if not cfg.get("enabled"):
+            return json.dumps({
+                "error": "LinkedIn is not configured",
+                "setup_required": True,
+                "message": "LinkedIn is not set up yet. To configure LinkedIn, the user needs to provide their LinkedIn email and password. You can ask them directly or they can use the /addlinkedin command via WhatsApp.",
+                "instructions": "Ask the user: 'I need your LinkedIn credentials to access your profile. What is your LinkedIn email address?'"
+            })
         
         try:
             if action == "get_messages":
