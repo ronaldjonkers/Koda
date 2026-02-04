@@ -435,7 +435,7 @@ Example: `/addbrave BSA1234567890abcdef`"""
     def _list_schedules(self) -> str:
         """List all scheduled tasks."""
         import json
-        from koda.cli.commands import get_data_dir
+        from koda.config.loader import get_data_dir
         from datetime import datetime
         
         cron_path = get_data_dir() / "cron" / "jobs.json"
@@ -507,7 +507,7 @@ Example: `/addbrave BSA1234567890abcdef`"""
     def _delete_schedule(self, job_id: str) -> str:
         """Delete a scheduled task by ID."""
         import json
-        from koda.cli.commands import get_data_dir
+        from koda.config.loader import get_data_dir
         
         cron_path = get_data_dir() / "cron" / "jobs.json"
         
