@@ -1,6 +1,4 @@
-"""
-from __future__ import annotations
-Base class for Koda plugins.
+"""Base class for Koda plugins.
 
 Plugins extend the assistant's capabilities by providing new tools.
 """

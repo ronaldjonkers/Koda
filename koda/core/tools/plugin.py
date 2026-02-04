@@ -1,6 +1,4 @@
-"""
-from __future__ import annotations
-Plugin management tool for the LLM.
+"""Plugin management tool for the LLM.
 
 Allows the agent to:
 - Create new plugins to solve problems

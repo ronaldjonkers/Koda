@@ -1,7 +1,4 @@
-"""
-from __future__ import annotations
-Plugin loader for dynamically loading plugins from disk.
-"""
+"""Plugin loader for dynamically loading plugins from disk."""
 from __future__ import annotations
 
 import importlib.util

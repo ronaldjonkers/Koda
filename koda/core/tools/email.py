@@ -26,7 +26,6 @@ Examples:
 - Read email: {"action": "read", "message_id": "abc123"}
 - Send email: {"action": "send", "to": "user@example.com", "subject": "Hello", "body": "Message content"}
 """
-from __future__ import annotations
     
     parameters = {
         "type": "object",

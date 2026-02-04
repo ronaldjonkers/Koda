@@ -32,7 +32,6 @@ Examples:
 - Search Exchange: {"action": "search", "query": "John", "account": "gosettle"}
 - Birthdays: {"action": "birthdays_upcoming", "days": 7}
 """
-from __future__ import annotations
     
     parameters = {
         "type": "object",
