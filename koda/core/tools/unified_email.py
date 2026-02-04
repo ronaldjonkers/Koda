@@ -205,9 +205,35 @@ Examples:
             else:
                 return f"Unknown action: {action}"
         
+        except ConnectionError as e:
+            # Connection errors - show friendly message to user, full error on server
+            import traceback
+            logger.error(f"Email connection error for account '{account_name}':")
+            logger.error(f"Full error: {e}")
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            return f"""❌ **Kan geen verbinding maken met email server**
+
+Account: {account_name}
+
+Mogelijke oorzaken:
+• Onjuiste inloggegevens (email/wachtwoord)
+• Server is niet bereikbaar
+• Autodiscover werkt niet voor dit account
+
+Probeer:
+1. Controleer of je wachtwoord correct is
+2. Gebruik /removemail {account_name} en /addmail om opnieuw in te stellen
+3. Probeer handmatig een server op te geven (niet autodiscover)
+
+_Technische fout is gelogd op de server._"""
+        
         except Exception as e:
-            logger.error(f"Email tool error: {e}")
-            return f"Error: {str(e)}"
+            # Other errors - log full details on server
+            import traceback
+            logger.error(f"Email tool error for action '{action}':")
+            logger.error(f"Full error: {e}")
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            return f"❌ **Email fout:** {str(e)}\n\n_Details zijn gelogd op de server._"
     
     def _list_accounts(self) -> str:
         """List all configured email accounts."""
