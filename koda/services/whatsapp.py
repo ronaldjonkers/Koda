@@ -5,6 +5,7 @@ Supports:
 - Per-contact rules: Custom instructions per phone number
 - Owner escalation: Notify owner for appointments/urgent requests
 - Message viewing from all numbers
+- WhatsApp commands (/help, /status, /name, etc.)
 """
 
 import asyncio
@@ -17,6 +18,7 @@ from koda.messaging.events import InboundMessage, OutboundMessage
 from koda.messaging.queue import MessageBus
 from koda.services.base import BaseChannel
 from koda.config.schema import WhatsAppConfig, WhatsAppContactRule
+from koda.config.loader import load_config, save_config
 
 
 class WhatsAppChannel(BaseChannel):
@@ -214,6 +216,91 @@ class WhatsAppChannel(BaseChannel):
         # Fall back to standard allow list
         return super().is_allowed(sender_id)
     
+    async def _handle_command(self, command: str, args: str, chat_id: str, phone: str) -> str | None:
+        """
+        Handle a WhatsApp command. Returns response text or None if not a command.
+        
+        Commands:
+        - /help - Show available commands
+        - /status - Show current configuration
+        - /name <name> - Set your name
+        - /assistant <name> - Set assistant name
+        - /language <code> - Set language (nl, en, de, fr, es)
+        - /style <style> - Set personality (professional, friendly, formal)
+        """
+        config = load_config()
+        
+        if command == "/help":
+            return """📋 *Beschikbare commando's:*
+
+*Informatie:*
+/help - Toon deze hulp
+/status - Toon huidige instellingen
+
+*Instellingen:*
+/name <naam> - Stel je naam in
+/assistant <naam> - Stel assistant naam in
+/language <code> - Stel taal in (nl, en, de, fr, es)
+/style <stijl> - Stel stijl in (professional, friendly, formal)
+
+*Voorbeeld:*
+`/name Ronald`
+`/language nl`"""
+
+        elif command == "/status":
+            assistant = config.assistant
+            wa = config.channels.whatsapp
+            mode = "Bot Mode (iedereen)" if wa.bot_mode else "Restricted Mode"
+            allowed = ", ".join(wa.allow_from) if wa.allow_from else "niemand"
+            
+            return f"""⚙️ *Huidige instellingen:*
+
+*Assistant:*
+• Naam: {assistant.name}
+• Jouw naam: {assistant.user_name or '(niet ingesteld)'}
+• Taal: {assistant.language}
+• Stijl: {assistant.personality}
+
+*WhatsApp:*
+• Modus: {mode}
+• Toegestaan: {allowed}
+• Owner: {wa.owner_name or wa.owner_phone or '(niet ingesteld)'}
+
+*Model:* {config.agents.defaults.model}"""
+
+        elif command == "/name":
+            if not args:
+                return "❌ Gebruik: `/name <jouw naam>`\nVoorbeeld: `/name Ronald`"
+            config.assistant.user_name = args
+            save_config(config)
+            return f"✅ Je naam is ingesteld op: *{args}*"
+        
+        elif command == "/assistant":
+            if not args:
+                return "❌ Gebruik: `/assistant <naam>`\nVoorbeeld: `/assistant Joyce`"
+            config.assistant.name = args
+            save_config(config)
+            return f"✅ Assistant naam is ingesteld op: *{args}*"
+        
+        elif command == "/language":
+            valid_langs = ["nl", "en", "de", "fr", "es"]
+            if not args or args.lower() not in valid_langs:
+                return f"❌ Gebruik: `/language <code>`\nGeldige codes: {', '.join(valid_langs)}"
+            config.assistant.language = args.lower()
+            save_config(config)
+            lang_names = {"nl": "Nederlands", "en": "English", "de": "Deutsch", "fr": "Français", "es": "Español"}
+            return f"✅ Taal ingesteld op: *{lang_names.get(args.lower(), args)}*"
+        
+        elif command == "/style":
+            valid_styles = ["professional", "friendly", "formal"]
+            if not args or args.lower() not in valid_styles:
+                return f"❌ Gebruik: `/style <stijl>`\nGeldige stijlen: {', '.join(valid_styles)}"
+            config.assistant.personality = args.lower()
+            save_config(config)
+            return f"✅ Stijl ingesteld op: *{args.lower()}*"
+        
+        return None  # Not a recognized command
+    
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
         try:
@@ -235,6 +322,22 @@ class WhatsAppChannel(BaseChannel):
             
             # Log incoming message
             logger.info(f"📥 WhatsApp message from +{phone}: {content[:100]}{'...' if len(content) > 100 else ''}")
+            
+            # Check for commands (only from allowed users)
+            if content.startswith("/") and self.is_allowed(phone):
+                parts = content.split(maxsplit=1)
+                command = parts[0].lower()
+                args = parts[1] if len(parts) > 1 else ""
+                
+                response = await self._handle_command(command, args, sender, phone)
+                if response:
+                    logger.info(f"📤 Sending command response to +{phone}")
+                    await self.send(OutboundMessage(
+                        channel="whatsapp",
+                        chat_id=sender,
+                        content=response
+                    ))
+                    return  # Don't process command as regular message
             
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
