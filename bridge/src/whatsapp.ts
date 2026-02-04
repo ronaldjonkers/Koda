@@ -119,6 +119,27 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
+    // NUCLEAR OPTION: Listen to messages.update as well (self-messages might come here)
+    this.sock.ev.on('messages.update', (updates: any[]) => {
+      console.log(`\n🔄 messages.update EVENT FIRED!`);
+      console.log(`   Update count: ${updates?.length || 0}`);
+      for (const update of updates || []) {
+        console.log(`   Update key:`, JSON.stringify(update.key));
+        console.log(`   Update data:`, JSON.stringify(update.update || {}).substring(0, 300));
+        if (update.key?.fromMe) {
+          console.log(`   ⚠️ This is an update for a message FROM ME`);
+        }
+      }
+    });
+
+    // NUCLEAR OPTION: Listen to ALL events to see what's coming through
+    const eventsToLog = ['messaging-history.set', 'chats.upsert', 'chats.update', 'chats.delete', 'presence.update', 'contacts.upsert', 'contacts.update'];
+    for (const eventName of eventsToLog) {
+      this.sock.ev.on(eventName as any, (data: any) => {
+        console.log(`\n🔔 ${eventName} EVENT:`, JSON.stringify(data).substring(0, 200));
+      });
+    }
+
     // Handle incoming messages - using jidDecode for robust self-message detection
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
