@@ -164,6 +164,18 @@ Parameters for 'create':
         # Check if Google Workspace is available (for Meet links)
         self._google_workspace_client = None
         self._google_workspace_available = self._check_google_workspace()
+        
+        # Auto-add Google Workspace as a calendar account if connected
+        if self._google_workspace_available:
+            # Check if we already have a google account
+            has_google = any(acc.get("type") == "google" for acc in self.calendar_accounts)
+            if not has_google:
+                self.calendar_accounts.append({
+                    "name": "Google",
+                    "type": "google",
+                    "auto_added": True
+                })
+                logger.info("Auto-added Google Workspace as calendar account")
     
     def _check_google_workspace(self) -> bool:
         """Check if Google Workspace is configured and authorized."""

@@ -15,6 +15,33 @@ def _get_attr(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+class GoogleWorkspaceEmailAdapter:
+    """Adapter to make GoogleWorkspaceClient compatible with email tool interface."""
+    
+    def __init__(self, client):
+        self.client = client
+    
+    def get_inbox(self, max_results: int = 10):
+        """Get inbox messages."""
+        return self.client.list_emails(max_results=max_results)
+    
+    def get_unread(self, max_results: int = 50):
+        """Get unread messages."""
+        return self.client.list_emails(query="is:unread", max_results=max_results)
+    
+    def search(self, query: str, max_results: int = 20):
+        """Search emails."""
+        return self.client.list_emails(query=query, max_results=max_results)
+    
+    def get_message(self, message_id: str):
+        """Get a specific message."""
+        return self.client.get_email(message_id)
+    
+    def send_email(self, to: str, subject: str, body: str, cc: str = None, bcc: str = None):
+        """Send an email."""
+        return self.client.send_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+
+
 class UnifiedEmailTool(Tool):
     """Tool for accessing configured email accounts."""
     
@@ -29,6 +56,7 @@ Actions:
 - unread: Get unread messages
 - search: Search emails by subject, sender, or content
 - read: Read full email content by ID (for summarizing)
+- send: Send an email (requires to, subject, body)
 
 Parameters:
 - account_name: Name of the email account (optional if only one account)
@@ -49,8 +77,24 @@ Examples:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list_accounts", "inbox", "today", "recent", "unread", "search", "read"],
+                "enum": ["list_accounts", "inbox", "today", "recent", "unread", "search", "read", "send"],
                 "description": "Action to perform"
+            },
+            "to": {
+                "type": "string",
+                "description": "Recipient email address (for send action)"
+            },
+            "subject": {
+                "type": "string",
+                "description": "Email subject (for send action)"
+            },
+            "body": {
+                "type": "string",
+                "description": "Email body content (for send action)"
+            },
+            "cc": {
+                "type": "string",
+                "description": "CC recipients, comma-separated (for send action)"
             },
             "account_name": {
                 "type": "string",
@@ -81,14 +125,39 @@ Examples:
     def __init__(self, config: Any = None):
         self.config = config
         self._clients = {}
+        self._google_workspace_client = None
+        self._google_workspace_available = self._check_google_workspace()
+    
+    def _check_google_workspace(self) -> bool:
+        """Check if Google Workspace is configured and authorized."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            if status.get("authorized"):
+                self._google_workspace_client = client
+                return True
+        except Exception:
+            pass
+        return False
     
     def _get_accounts(self) -> list[dict]:
         """Get all accounts with email capability from unified accounts."""
+        accounts = []
+        
+        # Auto-add Google Workspace if connected
+        if self._google_workspace_available:
+            accounts.append({
+                "name": "Gmail",
+                "type": "google",
+                "enabled": True,
+                "auto_added": True
+            })
+        
         if not self.config or not hasattr(self.config, 'integrations'):
-            return []
+            return accounts
         
         integrations = self.config.integrations
-        accounts = []
         
         # Use new unified method if available
         if hasattr(integrations, 'get_all_email_accounts'):
@@ -157,7 +226,13 @@ Examples:
         
         acc_type = account.get("type", "")
         
-        if acc_type == "imap":
+        if acc_type == "google":
+            # Use Google Workspace client for Gmail
+            if self._google_workspace_client:
+                self._clients[account_name] = GoogleWorkspaceEmailAdapter(self._google_workspace_client)
+            else:
+                raise ValueError("Google Workspace not connected. Use dashboard to authenticate.")
+        elif acc_type == "imap":
             from koda.integrations.imap_client import IMAPClient
             self._clients[account_name] = IMAPClient(
                 host=account.get("host", ""),
@@ -226,6 +301,14 @@ Examples:
                 if not message_id:
                     return "Error: message_id required for read action"
                 return self._read_message(client, message_id)
+            
+            elif action == "send":
+                to = kwargs.get("to")
+                subject = kwargs.get("subject")
+                body = kwargs.get("body")
+                if not to or not subject or not body:
+                    return "Error: to, subject, and body are required for send action"
+                return self._send_email(client, to, subject, body, kwargs.get("cc"))
             
             else:
                 return f"Unknown action: {action}"
@@ -377,6 +460,21 @@ _Technische fout is gelogd op de server._"""
             ][:max_results]
         
         return self._format_messages(messages, f"Search results for '{query}'")
+    
+    def _send_email(self, client, to: str, subject: str, body: str, cc: str = None) -> str:
+        """Send an email."""
+        try:
+            if hasattr(client, 'send_email'):
+                result = client.send_email(to=to, subject=subject, body=body, cc=cc)
+                if result:
+                    return f"✅ **Email verzonden**\n\n📧 Naar: {to}\n📝 Onderwerp: {subject}"
+                else:
+                    return "❌ Kon email niet verzenden"
+            else:
+                return "❌ Dit account ondersteunt geen emails verzenden"
+        except Exception as e:
+            logger.error(f"Failed to send email: {e}")
+            return f"❌ Fout bij verzenden: {e}"
     
     def _read_message(self, client, message_id: str) -> str:
         """Read full message content."""
