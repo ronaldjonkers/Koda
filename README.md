@@ -651,6 +651,36 @@ Use `--verbose` for even more detail: `koda gateway --verbose`
 - **Per-Contact Rules**: Custom instructions per phone number
 - **Owner Escalation**: Forward appointment requests to the owner
 - **Automatic Greeting**: Customizable welcome message
+- **WhatsApp Commands**: Configure settings directly via WhatsApp
+
+#### WhatsApp Commands
+
+Configure Koda directly from WhatsApp by sending commands:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all available commands |
+| `/status` | Show current configuration |
+| `/accounts` | Show configured mail/calendar accounts |
+| `/name <name>` | Set your name |
+| `/assistant <name>` | Set assistant name |
+| `/language <code>` | Set language (nl, en, de, fr, es) |
+| `/style <style>` | Set personality (professional, friendly, formal) |
+| `/addmail` | Add email account (step-by-step) |
+| `/addmail json` | Add email account via JSON |
+| `/addcalendar` | Add calendar account (step-by-step) |
+| `/addcalendar json` | Add calendar account via JSON |
+| `/removemail <name>` | Remove email account |
+| `/removecalendar <name>` | Remove calendar account |
+| `/cancel` | Cancel active setup session |
+
+**Examples:**
+```
+/name Ronald
+/language nl
+/addmail
+/status
+```
 
 ## � LinkedIn Integration
 

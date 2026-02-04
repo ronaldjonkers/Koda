@@ -60,13 +60,26 @@ class WebSearchTool(Tool):
     def __init__(self, api_key: str | None = None, max_results: int = 5):
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
+        # Log API key status for debugging
+        from loguru import logger
+        if self.api_key:
+            logger.debug(f"WebSearchTool initialized with API key: {self.api_key[:10]}...")
+        else:
+            logger.warning("WebSearchTool: No Brave API key configured - web_search will not work")
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        from loguru import logger
+        
+        logger.info(f"🔍 web_search called with query: '{query}'")
+        
         if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
+            logger.error("web_search failed: BRAVE_API_KEY not configured")
+            return "Error: BRAVE_API_KEY not configured. Use DuckDuckGo search (ddg_search) instead, or configure Brave API key in ~/.koda/config.json under tools.web.search.api_key"
         
         try:
             n = min(max(count or self.max_results, 1), 10)
+            logger.debug(f"Calling Brave Search API for '{query}' (count={n})")
+            
             async with httpx.AsyncClient() as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
@@ -74,11 +87,26 @@ class WebSearchTool(Tool):
                     headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
                     timeout=10.0
                 )
+                
+                logger.debug(f"Brave API response status: {r.status_code}")
+                
+                if r.status_code == 401:
+                    logger.error("Brave API: Invalid API key (401 Unauthorized)")
+                    return "Error: Invalid Brave API key. Check your API key in ~/.koda/config.json"
+                elif r.status_code == 429:
+                    logger.error("Brave API: Rate limit exceeded (429)")
+                    return "Error: Brave API rate limit exceeded. Try again later or use ddg_search."
+                
                 r.raise_for_status()
             
-            results = r.json().get("web", {}).get("results", [])
+            data = r.json()
+            results = data.get("web", {}).get("results", [])
+            
             if not results:
+                logger.info(f"No results found for: {query}")
                 return f"No results for: {query}"
+            
+            logger.info(f"Found {len(results)} results for: {query}")
             
             lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results[:n], 1):
@@ -86,8 +114,15 @@ class WebSearchTool(Tool):
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
+        except httpx.TimeoutException:
+            logger.error(f"web_search timeout for query: {query}")
+            return "Error: Search request timed out. Try again or use ddg_search."
+        except httpx.HTTPStatusError as e:
+            logger.error(f"web_search HTTP error: {e.response.status_code} - {e}")
+            return f"Error: HTTP {e.response.status_code} - {e}"
         except Exception as e:
-            return f"Error: {e}"
+            logger.error(f"web_search unexpected error: {type(e).__name__}: {e}")
+            return f"Error: {type(e).__name__}: {e}"
 
 
 class DuckDuckGoSearchTool(Tool):
@@ -108,9 +143,14 @@ class DuckDuckGoSearchTool(Tool):
         self.max_results = max_results
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        from loguru import logger
+        
+        logger.info(f"🦆 ddg_search called with query: '{query}'")
+        
         try:
             from duckduckgo_search import DDGS
         except ImportError:
+            logger.error("ddg_search failed: duckduckgo-search not installed")
             return "Error: duckduckgo-search not installed. Run: pip install duckduckgo-search"
         
         try:
@@ -124,10 +164,14 @@ class DuckDuckGoSearchTool(Tool):
                 with DDGS() as ddgs:
                     return list(ddgs.text(query, max_results=n))
             
+            logger.debug(f"Calling DuckDuckGo for '{query}' (count={n})")
             results = await loop.run_in_executor(None, do_search)
             
             if not results:
+                logger.info(f"No results found for: {query}")
                 return f"No results for: {query}"
+            
+            logger.info(f"Found {len(results)} results for: {query}")
             
             lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results[:n], 1):
@@ -137,7 +181,8 @@ class DuckDuckGoSearchTool(Tool):
                     lines.append(f"   {body}")
             return "\n".join(lines)
         except Exception as e:
-            return f"Error: {e}"
+            logger.error(f"ddg_search error: {type(e).__name__}: {e}")
+            return f"Error: {type(e).__name__}: {e}"
 
 
 class WikipediaSearchTool(Tool):
