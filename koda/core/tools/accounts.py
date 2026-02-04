@@ -139,6 +139,11 @@ Examples:
         """Fallback: get accounts from legacy structure."""
         accounts = {}
         
+        # Check for Google Workspace first (auto-detect if authorized)
+        google_account = self._check_google_workspace()
+        if google_account:
+            accounts["Google Workspace"] = google_account
+        
         # Unified accounts list
         for acc in getattr(integrations, 'accounts', []) or []:
             name = self._get_attr(acc, 'name', '')
@@ -158,3 +163,24 @@ Examples:
                 accounts[name] = acc
         
         return list(accounts.values())
+    
+    def _check_google_workspace(self) -> dict | None:
+        """Check if Google Workspace is configured and return as account."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            if status.get("authorized"):
+                # Get user email from status
+                user_email = status.get("email", "")
+                return {
+                    "name": "Google Workspace",
+                    "type": "google",
+                    "email": user_email,
+                    "enabled": True,
+                    "capabilities": ["email", "calendar"],
+                    "auto_detected": True
+                }
+        except Exception as e:
+            logger.debug(f"Google Workspace check: {e}")
+        return None

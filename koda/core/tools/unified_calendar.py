@@ -203,11 +203,15 @@ Parameters for 'create':
             from koda.integrations.google_workspace import GoogleWorkspaceClient
             client = GoogleWorkspaceClient()
             status = client.get_status()
+            logger.debug(f"Google Workspace status: {status}")
             if status.get("authorized"):
                 self._google_workspace_client = client
+                logger.info("Google Workspace is authorized and available")
                 return True
-        except Exception:
-            pass
+            else:
+                logger.debug(f"Google Workspace not authorized: {status}")
+        except Exception as e:
+            logger.debug(f"Google Workspace check failed: {e}")
         return False
     
     def _get_client_for_account(self, account: dict) -> Any:
