@@ -37,6 +37,7 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private sentMessageIds: Set<string> = new Set(); // Track sent messages to prevent loops
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
@@ -128,7 +129,14 @@ export class WhatsAppClient {
       
       for (const msg of messages) {
         const remoteJid = msg.key?.remoteJid;
+        const messageId = msg.key?.id;
         if (!remoteJid) continue;
+        
+        // Skip messages we sent ourselves (prevents infinite loops)
+        if (messageId && this.sentMessageIds.has(messageId)) {
+          this.sentMessageIds.delete(messageId); // Clean up
+          continue;
+        }
         
         // Skip status updates and broadcasts
         if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) {
@@ -208,7 +216,14 @@ export class WhatsAppClient {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const result = await this.sock.sendMessage(to, { text });
+    
+    // Track the message ID to prevent processing it as incoming
+    if (result?.key?.id) {
+      this.sentMessageIds.add(result.key.id);
+      // Clean up old IDs after 60 seconds to prevent memory leak
+      setTimeout(() => this.sentMessageIds.delete(result.key.id), 60000);
+    }
   }
 
   async disconnect(): Promise<void> {
