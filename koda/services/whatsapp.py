@@ -265,7 +265,8 @@ class WhatsAppChannel(BaseChannel):
 /delschedule <id> - Delete a scheduled task
 
 *Other:*
-/cancel - Cancel active setup"""
+/cancel - Cancel active setup
+/resetlinkedin - Reset LinkedIn (clear cookies, force re-login)"""
 
         elif command == "/status":
             assistant = config.assistant
@@ -381,6 +382,9 @@ Example: `/addbrave BSA1234567890abcdef`"""
             if not args:
                 return "❌ Usage: `/delschedule <id>`\nUse /schedules to see IDs."
             return self._delete_schedule(args.strip())
+        
+        elif command == "/resetlinkedin":
+            return self._reset_linkedin()
         
         return None  # Not a recognized command
     
@@ -558,6 +562,29 @@ Step 1/2: Enter your LinkedIn email address:
         config.integrations.linkedin.password = ""
         save_config(config)
         return "✅ LinkedIn account removed."
+    
+    def _reset_linkedin(self) -> str:
+        """Reset LinkedIn by clearing cookies to force re-authentication."""
+        from pathlib import Path
+        
+        cookies_path = Path.home() / ".koda" / "linkedin_cookies.json"
+        
+        try:
+            if cookies_path.exists():
+                cookies_path.unlink()
+                return """✅ *LinkedIn Reset*
+
+Cookies cleared. LinkedIn will re-authenticate on next use.
+
+If you're still having issues:
+1. Check your LinkedIn email for security alerts
+2. LinkedIn may require a CAPTCHA - try logging in via browser first
+3. Use `/removelinkedin` then `/addlinkedin` to reconfigure"""
+            else:
+                return "ℹ️ No LinkedIn cookies found. LinkedIn will authenticate fresh on next use."
+        except Exception as e:
+            logger.error(f"Error resetting LinkedIn: {e}")
+            return f"❌ Error resetting LinkedIn: {e}"
     
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""

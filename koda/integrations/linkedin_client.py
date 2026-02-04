@@ -96,7 +96,7 @@ class LinkedInClient:
                 "linkedin-api not installed. Run: pip install linkedin-api"
             )
         
-        # Try to load existing cookies
+        # Try to load existing cookies (but be ready to retry without them)
         cookies = None
         if self.cookies_path.exists() and not self._refresh_cookies:
             try:
@@ -107,21 +107,39 @@ class LinkedInClient:
                 cookies = requests.cookies.RequestsCookieJar()
                 for name, value in cookies_dict.items():
                     cookies.set(name, value)
-                logger.debug("Loaded LinkedIn cookies from cache")
+                logger.debug(f"Loaded {len(cookies_dict)} LinkedIn cookies from cache")
             except Exception as e:
                 logger.warning(f"Failed to load cookies: {e}")
                 cookies = None
         
-        # Authenticate
+        # Authenticate - try with cookies first, then without
         try:
             if cookies:
-                self._api = Linkedin(self.email, self.password, cookies=cookies)
+                try:
+                    self._api = Linkedin(self.email, self.password, cookies=cookies)
+                    # Test the connection by making a simple call
+                    self._api.get_user_profile()
+                    logger.info("LinkedIn connected with cached cookies")
+                except Exception as cookie_err:
+                    logger.warning(f"Cached cookies failed: {cookie_err}, trying fresh login")
+                    # Delete old cookies and try fresh
+                    if self.cookies_path.exists():
+                        self.cookies_path.unlink()
+                    self._api = Linkedin(self.email, self.password)
+                    self._save_cookies()
+                    logger.info("LinkedIn connected with fresh login")
             else:
                 self._api = Linkedin(self.email, self.password)
-                # Save cookies for future use
                 self._save_cookies()
+                logger.info("LinkedIn connected with fresh login")
         except Exception as e:
             logger.error(f"LinkedIn authentication failed: {e}")
+            # Clear any stale cookies
+            if self.cookies_path.exists():
+                try:
+                    self.cookies_path.unlink()
+                except:
+                    pass
             raise
     
     def _save_cookies(self) -> None:
