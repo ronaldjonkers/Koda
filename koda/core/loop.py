@@ -132,6 +132,13 @@ class AgentLoop:
         
         # Build calendar accounts list from config
         calendar_accounts = []
+        
+        # Auto-detect Google Workspace FIRST (OAuth-based, not in config)
+        google_workspace_account = self._detect_google_workspace()
+        if google_workspace_account:
+            calendar_accounts.append(google_workspace_account)
+            logger.info(f"Auto-detected Google Workspace: {google_workspace_account.get('email', 'unknown')}")
+        
         if full_config and hasattr(full_config, 'integrations'):
             # First, get from unified accounts list (filter by calendar capability)
             unified_accounts = getattr(full_config.integrations, 'accounts', []) or []
@@ -278,6 +285,25 @@ class AgentLoop:
                 "calendar_path": getattr(acc, 'calendar_path', ''),
                 "capabilities": getattr(acc, 'capabilities', []),
             }
+    
+    def _detect_google_workspace(self) -> dict | None:
+        """Auto-detect Google Workspace if authorized (OAuth-based, not in config)."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            if status.get("authorized"):
+                return {
+                    "name": "Google Workspace",
+                    "type": "google",
+                    "email": status.get("email", ""),
+                    "enabled": True,
+                    "capabilities": ["email", "calendar"],
+                    "auto_detected": True
+                }
+        except Exception as e:
+            logger.debug(f"Google Workspace detection: {e}")
+        return None
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""

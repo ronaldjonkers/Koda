@@ -136,9 +136,11 @@ Examples:
             status = client.get_status()
             if status.get("authorized"):
                 self._google_workspace_client = client
+                self._google_workspace_email = status.get("email", "")
+                logger.info(f"Google Workspace email available: {self._google_workspace_email}")
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Google Workspace email check: {e}")
         return False
     
     def _get_accounts(self) -> list[dict]:
@@ -148,9 +150,11 @@ Examples:
         # Auto-add Google Workspace if connected
         if self._google_workspace_available:
             accounts.append({
-                "name": "Gmail",
+                "name": "Google Workspace",
                 "type": "google",
+                "email": getattr(self, '_google_workspace_email', ''),
                 "enabled": True,
+                "capabilities": ["email", "calendar"],
                 "auto_added": True
             })
         
