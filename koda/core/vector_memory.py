@@ -364,3 +364,206 @@ class VectorMemoryStore:
             count += 1
         
         return count
+    
+    def keyword_search(
+        self,
+        query: str,
+        n_results: int = 10,
+        category: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Search memories by keyword matching (BM25-style).
+        
+        Args:
+            query: The search query (keywords).
+            n_results: Maximum number of results.
+            category: Filter by category (optional).
+        
+        Returns:
+            List of matching memories with scores.
+        """
+        self._ensure_initialized()
+        
+        # Get all documents (or filtered by category)
+        where_filter = {"category": category} if category else None
+        results = self._collection.get(
+            where=where_filter,
+            include=["documents", "metadatas"]
+        )
+        
+        if not results or not results["documents"]:
+            return []
+        
+        # Simple keyword scoring
+        query_terms = query.lower().split()
+        scored = []
+        
+        for i, doc in enumerate(results["documents"]):
+            doc_lower = doc.lower()
+            score = 0
+            
+            for term in query_terms:
+                # Count occurrences
+                count = doc_lower.count(term)
+                if count > 0:
+                    # BM25-inspired scoring
+                    score += count / (count + 1.5)
+            
+            if score > 0:
+                scored.append({
+                    "id": results["ids"][i],
+                    "content": doc,
+                    "metadata": results["metadatas"][i] if results["metadatas"] else {},
+                    "score": score
+                })
+        
+        # Sort by score and return top N
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:n_results]
+    
+    def hybrid_search(
+        self,
+        query: str,
+        n_results: int = 5,
+        category: str | None = None,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3
+    ) -> list[dict[str, Any]]:
+        """
+        Hybrid search combining semantic (vector) and keyword search.
+        
+        This provides better results by combining:
+        - Semantic similarity (understands meaning)
+        - Keyword matching (exact term matches)
+        
+        Args:
+            query: The search query.
+            n_results: Maximum number of results.
+            category: Filter by category (optional).
+            vector_weight: Weight for vector search results (0-1).
+            keyword_weight: Weight for keyword search results (0-1).
+        
+        Returns:
+            List of matching memories with combined scores.
+        """
+        # Get results from both methods
+        vector_results = self.search(query, n_results=n_results * 2, category=category)
+        keyword_results = self.keyword_search(query, n_results=n_results * 2, category=category)
+        
+        # Normalize scores
+        if vector_results:
+            max_v = max(r["score"] for r in vector_results)
+            for r in vector_results:
+                r["vector_score"] = r["score"] / max_v if max_v > 0 else 0
+        
+        if keyword_results:
+            max_k = max(r["score"] for r in keyword_results)
+            for r in keyword_results:
+                r["keyword_score"] = r["score"] / max_k if max_k > 0 else 0
+        
+        # Merge results
+        merged = {}
+        
+        for r in vector_results:
+            merged[r["id"]] = {
+                "id": r["id"],
+                "content": r["content"],
+                "metadata": r["metadata"],
+                "vector_score": r.get("vector_score", 0),
+                "keyword_score": 0
+            }
+        
+        for r in keyword_results:
+            if r["id"] in merged:
+                merged[r["id"]]["keyword_score"] = r.get("keyword_score", 0)
+            else:
+                merged[r["id"]] = {
+                    "id": r["id"],
+                    "content": r["content"],
+                    "metadata": r["metadata"],
+                    "vector_score": 0,
+                    "keyword_score": r.get("keyword_score", 0)
+                }
+        
+        # Calculate combined scores
+        results = []
+        for item in merged.values():
+            combined_score = (
+                item["vector_score"] * vector_weight +
+                item["keyword_score"] * keyword_weight
+            )
+            item["score"] = combined_score
+            results.append(item)
+        
+        # Sort by combined score
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:n_results]
+    
+    def auto_index_file(self, filepath: Path, chunk_size: int = 500) -> int:
+        """
+        Auto-index a file into memory with chunking.
+        
+        Args:
+            filepath: Path to the file to index.
+            chunk_size: Approximate characters per chunk.
+        
+        Returns:
+            Number of chunks indexed.
+        """
+        if not filepath.exists():
+            return 0
+        
+        content = filepath.read_text()
+        filename = filepath.name
+        
+        # Split into chunks
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for line in content.split('\n'):
+            current_chunk.append(line)
+            current_size += len(line)
+            
+            if current_size >= chunk_size:
+                chunks.append('\n'.join(current_chunk))
+                current_chunk = []
+                current_size = 0
+        
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        # Index each chunk
+        for i, chunk in enumerate(chunks):
+            self.add(
+                content=chunk,
+                category="file",
+                metadata={
+                    "filename": filename,
+                    "filepath": str(filepath),
+                    "chunk_index": i,
+                    "total_chunks": len(chunks)
+                },
+                source="file_index"
+            )
+        
+        logger.info(f"Indexed {len(chunks)} chunks from {filename}")
+        return len(chunks)
+    
+    def get_stats(self) -> dict[str, Any]:
+        """Get memory store statistics."""
+        self._ensure_initialized()
+        
+        total = self._collection.count()
+        
+        # Count by category
+        categories = {}
+        for cat in ["facts", "preferences", "context", "tasks", "general", "file"]:
+            categories[cat] = self.count(cat)
+        
+        return {
+            "total_memories": total,
+            "by_category": categories,
+            "db_path": str(self.db_path),
+            "embedding_model": self.embedding_model
+        }
