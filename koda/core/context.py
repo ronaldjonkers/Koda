@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from koda.core.memory import MemoryStore
-from koda.core.skills import SkillsLoader
+from koda.core.skills.loader import SkillsLoader
 
 
 class ContextBuilder:
@@ -28,7 +28,10 @@ class ContextBuilder:
     ):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+        self.skills = SkillsLoader([
+            Path.home() / ".koda" / "skills",
+            workspace / "skills",
+        ])
         self.assistant_name = assistant_name
         self.user_name = user_name
         self.default_language = default_language
@@ -63,23 +66,15 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
         
-        # Skills - progressive loading
-        # 1. Always-loaded skills: include full content
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-        
-        # 2. Available skills: only show summary (agent uses read_file to load)
-        skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
+        # Skills - show available skills (agent uses read_file to load full content)
+        skills_prompt = self.skills.get_skills_prompt()
+        if skills_prompt:
             parts.append(f"""# Skills
 
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+Before responding, check if any skill matches the user's request.
 
-{skills_summary}""")
+{skills_prompt}""")
         
         return "\n\n---\n\n".join(parts)
     
