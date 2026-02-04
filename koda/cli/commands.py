@@ -444,6 +444,7 @@ server {{
     }}
 }}
 """
+from __future__ import annotations
     elif server == "caddy":
         config = f"""# Caddy reverse proxy configuration for Koda
 # Save this as: /etc/caddy/Caddyfile

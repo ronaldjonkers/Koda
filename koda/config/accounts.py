@@ -10,6 +10,7 @@ This module provides unified functions for:
 Both CLI wizard and WhatsApp commands should use these functions
 to ensure consistent behavior and data storage.
 """
+from __future__ import annotations
 
 from typing import Any
 from loguru import logger

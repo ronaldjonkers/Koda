@@ -27,6 +27,7 @@ Examples:
 - List calendars: {"action": "calendars"}
 - List emails: {"action": "emails"}
 """
+from __future__ import annotations
     
     parameters = {
         "type": "object",

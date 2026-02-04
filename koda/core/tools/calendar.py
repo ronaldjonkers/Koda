@@ -23,6 +23,7 @@ Examples:
 - Today's events: {"action": "today"}
 - Create event: {"action": "create", "summary": "Meeting", "start": "2024-01-15T10:00:00", "end": "2024-01-15T11:00:00"}
 """
+from __future__ import annotations
     
     parameters = {
         "type": "object",

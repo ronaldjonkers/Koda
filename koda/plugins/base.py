@@ -1,8 +1,10 @@
 """
+from __future__ import annotations
 Base class for Koda plugins.
 
 Plugins extend the assistant's capabilities by providing new tools.
 """
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field

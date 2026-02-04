@@ -1,4 +1,5 @@
 """
+from __future__ import annotations
 Plugin management tool for the LLM.
 
 Allows the agent to:
@@ -7,6 +8,7 @@ Allows the agent to:
 - Enable/disable plugins
 - View plugin source code
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path

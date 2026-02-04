@@ -89,10 +89,10 @@ install_homebrew() {
 
 # Install Python (macOS)
 install_python_macos() {
-    if ! command_exists python3.12 && ! command_exists python3.11; then
-        print_step "Installing Python 3.12..."
-        brew install python@3.12
-        print_success "Python 3.12 installed"
+    if ! command_exists python3.13 && ! command_exists python3.12 && ! command_exists python3.11; then
+        print_step "Installing Python 3.13..."
+        brew install python@3.13
+        print_success "Python 3.13 installed"
     else
         print_success "Python 3.11+ already installed"
     fi
@@ -100,21 +100,28 @@ install_python_macos() {
 
 # Install Python (Linux)
 install_python_linux() {
-    if ! command_exists python3.12 && ! command_exists python3.11; then
-        print_step "Installing Python..."
+    if ! command_exists python3.13 && ! command_exists python3.12 && ! command_exists python3.11; then
+        print_step "Installing Python 3.13..."
         case $DISTRO in
             ubuntu|debian|pop)
                 sudo apt-get update
+                # Try to add deadsnakes PPA for latest Python
+                sudo apt-get install -y software-properties-common 2>/dev/null || true
+                sudo add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+                sudo apt-get update
+                sudo apt-get install -y python3.13 python3.13-venv python3-pip || \
                 sudo apt-get install -y python3.12 python3.12-venv python3-pip || \
                 sudo apt-get install -y python3.11 python3.11-venv python3-pip || \
                 sudo apt-get install -y python3 python3-venv python3-pip
                 ;;
             fedora)
+                sudo dnf install -y python3.13 python3-pip || \
                 sudo dnf install -y python3.12 python3-pip || \
                 sudo dnf install -y python3.11 python3-pip || \
                 sudo dnf install -y python3 python3-pip
                 ;;
             centos|rhel|rocky|alma)
+                sudo yum install -y python3.13 python3-pip || \
                 sudo yum install -y python3.12 python3-pip || \
                 sudo yum install -y python3.11 python3-pip || \
                 sudo yum install -y python3 python3-pip
@@ -123,6 +130,7 @@ install_python_linux() {
                 sudo pacman -S --noconfirm python python-pip
                 ;;
             opensuse*)
+                sudo zypper install -y python313 python313-pip || \
                 sudo zypper install -y python312 python312-pip || \
                 sudo zypper install -y python311 python311-pip || \
                 sudo zypper install -y python3 python3-pip
@@ -270,7 +278,9 @@ setup_koda() {
     
     # Create virtual environment
     print_step "Creating virtual environment..."
-    if command_exists python3.12; then
+    if command_exists python3.13; then
+        PYTHON_CMD="python3.13"
+    elif command_exists python3.12; then
         PYTHON_CMD="python3.12"
     elif command_exists python3.11; then
         PYTHON_CMD="python3.11"

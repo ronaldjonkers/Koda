@@ -2,6 +2,7 @@
 
 Works with any IMAP-compatible email server.
 """
+from __future__ import annotations
 
 import email
 import imaplib

@@ -6,6 +6,7 @@ Compatible with:
 - Exchange 2019 (Build 15.2)
 - Office 365 / Exchange Online
 """
+from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any

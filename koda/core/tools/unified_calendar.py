@@ -50,6 +50,7 @@ Parameters for 'create':
 - whatsapp_reminder: Minutes before event to send WhatsApp reminder
 - reminder_phone: Phone number for WhatsApp reminder (defaults to owner)
 """
+from __future__ import annotations
     
     parameters = {
         "type": "object",

@@ -7,6 +7,7 @@ Supports:
 - Message viewing from all numbers
 - WhatsApp commands (/help, /status, /name, etc.)
 """
+from __future__ import annotations
 
 import asyncio
 import json

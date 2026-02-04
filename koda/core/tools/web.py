@@ -1,4 +1,5 @@
 """Web tools: web_search, web_fetch, and free alternatives."""
+from __future__ import annotations
 
 import html
 import json

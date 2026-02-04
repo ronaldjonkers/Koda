@@ -46,6 +46,7 @@ Common cron patterns:
 The 'prompt' is what the agent should do when the task runs. Be specific!
 Example: "Get today's weather for Amsterdam, my calendar events, and send a summary to WhatsApp"
 """
+from __future__ import annotations
     
     parameters = {
         "type": "object",

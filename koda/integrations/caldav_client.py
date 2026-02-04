@@ -2,6 +2,7 @@
 
 Supports: Nextcloud, ownCloud, Radicale, Baikal, macOS Server, and other CalDAV servers.
 """
+from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any

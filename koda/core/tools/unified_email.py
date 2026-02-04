@@ -43,6 +43,7 @@ Examples:
 - Search for invoices: {"action": "search", "query": "invoice"}
 - Read specific email: {"action": "read", "message_id": "abc123"}
 """
+from __future__ import annotations
     
     parameters = {
         "type": "object",
