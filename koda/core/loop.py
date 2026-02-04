@@ -24,7 +24,9 @@ from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
 from koda.core.tools.script import ScriptTool
 from koda.core.tools.schedule import ScheduleTool
+from koda.core.tools.plugin import PluginTool, PluginWrapperTool
 from koda.core.tools.linkedin import LinkedInTool
+from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
 from koda.session.manager import SessionManager
@@ -179,6 +181,13 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(ScheduleTool(cron_service=self.cron_service))
         
+        # Plugin tool (create/manage plugins)
+        self.tools.register(PluginTool())
+        
+        # Load user plugins from ~/.koda/plugins/
+        self.plugin_loader = PluginLoader()
+        self._load_plugins()
+        
         # LinkedIn tool
         linkedin_cfg = self.calendar_config.get("linkedin", {})
         if linkedin_cfg.get("enabled"):
@@ -187,6 +196,18 @@ class AgentLoop:
                 password=linkedin_cfg.get("password", ""),
                 enabled=True
             ))
+    
+    def _load_plugins(self) -> None:
+        """Load plugins from the plugins directory and register their tools."""
+        try:
+            plugins = self.plugin_loader.load_all()
+            for name, plugin in plugins.items():
+                # Create a wrapper tool for each plugin
+                wrapper = PluginWrapperTool(plugin, self.plugin_loader)
+                self.tools.register(wrapper)
+                logger.info(f"Registered plugin: {name}")
+        except Exception as e:
+            logger.warning(f"Error loading plugins: {e}")
     
     def _account_to_dict(self, acc) -> dict:
         """Convert account (dict or Pydantic model) to dict with snake_case keys."""
