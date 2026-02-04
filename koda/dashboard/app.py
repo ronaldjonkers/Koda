@@ -730,7 +730,7 @@ Vul je Gmail adres en het 16-letter App Wachtwoord in het formulier hieronder in
             client = ICloudContactsClient(use_local=True)
             
             # Try to get contacts count
-            contacts = client.get_all_contacts()
+            contacts = client.get_contacts()
             contacts_with_birthdays = [c for c in contacts if c.get("birthday")]
             
             return {
@@ -741,7 +741,6 @@ Vul je Gmail adres en het 16-letter App Wachtwoord in het formulier hieronder in
                 "message": f"✅ {len(contacts)} contacten gevonden, {len(contacts_with_birthdays)} met verjaardag"
             }
         except Exception as e:
-            logger.debug(f"Contacts check: {e}")
             return {
                 "available": False,
                 "source": "macOS Contacts",
