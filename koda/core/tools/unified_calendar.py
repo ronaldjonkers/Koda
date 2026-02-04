@@ -526,12 +526,36 @@ _Technische fout is gelogd op de server._"""
                     meet_link = result.get("meet_link")
             
             elif account_type == "exchange":
+                # For Exchange, fetch a Meet link if requested and Google Workspace is available
+                location = kwargs.get("location", "")
+                description = kwargs.get("description", "")
+                
+                if add_meet_link and self._google_workspace_available:
+                    try:
+                        from koda.core.tools.google_meet import GoogleMeetTool
+                        meet_tool = GoogleMeetTool()
+                        fetched_meet_link = meet_tool.get_quick_meet_link()
+                        if fetched_meet_link:
+                            meet_link = fetched_meet_link
+                            # Add to location
+                            if location:
+                                location = f"{location} | {meet_link}"
+                            else:
+                                location = meet_link
+                            # Add to description/body
+                            if description:
+                                description = f"{description}\n\n🔗 Google Meet: {meet_link}"
+                            else:
+                                description = f"🔗 Google Meet: {meet_link}"
+                    except Exception as e:
+                        logger.warning(f"Could not fetch Meet link for Exchange event: {e}")
+                
                 result = client.create_calendar_event(
                     subject=summary,
                     start=start,
                     end=end,
-                    body=kwargs.get("description"),
-                    location=kwargs.get("location"),
+                    body=description or None,
+                    location=location or None,
                     attendees=kwargs.get("attendees")
                 )
             

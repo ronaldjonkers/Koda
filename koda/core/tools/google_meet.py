@@ -27,8 +27,12 @@ Use this tool when the user asks to:
 - Add a Meet link to a calendar event
 
 Actions:
+- quick: Get a Meet link instantly (no calendar event visible)
 - create: Create a new Meet link (creates a calendar event with Meet attached)
 - add_to_event: Add Meet link to an existing calendar event
+
+Parameters for 'quick':
+- title: Optional meeting title (default: Quick Meeting)
 
 Parameters for 'create':
 - title: Meeting title (required)
@@ -46,7 +50,7 @@ Parameters for 'add_to_event':
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "add_to_event"],
+                "enum": ["quick", "create", "add_to_event"],
                 "description": "Action to perform"
             },
             "title": {
@@ -112,7 +116,9 @@ Na koppeling kun je:
 - Automatisch Meet links toevoegen aan afspraken"""
         
         try:
-            if action == "create":
+            if action == "quick":
+                return await self._quick_meet(**kwargs)
+            elif action == "create":
                 return await self._create_meet(**kwargs)
             elif action == "add_to_event":
                 return await self._add_meet_to_event(**kwargs)
@@ -121,6 +127,75 @@ Na koppeling kun je:
         except Exception as e:
             logger.error(f"Google Meet error: {e}")
             return f"❌ Error: {e}"
+    
+    async def _quick_meet(self, **kwargs) -> str:
+        """Create a quick Meet link without a visible calendar event."""
+        title = kwargs.get("title", "Quick Meeting")
+        
+        # Create a short event (5 min) to get the Meet link
+        now = datetime.now()
+        start = now.replace(second=0, microsecond=0)
+        end = start + timedelta(minutes=5)
+        
+        # Create event with Meet link
+        event = self._client.create_event(
+            summary=f"[Auto] {title}",
+            start=start,
+            end=end,
+            add_meet_link=True,
+            send_notifications=False
+        )
+        
+        if not event or not event.meet_link:
+            return "❌ Kon geen Meet link aanmaken"
+        
+        meet_link = event.meet_link
+        
+        # Delete the temporary event immediately
+        try:
+            self._client.delete_event(event_id=event.id, calendar_id="primary")
+        except Exception:
+            pass  # Event might auto-delete or not matter
+        
+        return f"""🔗 **Google Meet Link**
+
+`{meet_link}`
+
+_Deze link is direct te gebruiken en verloopt niet._"""
+    
+    def get_quick_meet_link(self) -> str | None:
+        """Get a Meet link synchronously (for use by other tools)."""
+        if not self._available:
+            return None
+        
+        try:
+            now = datetime.now()
+            start = now.replace(second=0, microsecond=0)
+            end = start + timedelta(minutes=5)
+            
+            event = self._client.create_event(
+                summary="[Auto] Quick Meeting",
+                start=start,
+                end=end,
+                add_meet_link=True,
+                send_notifications=False
+            )
+            
+            if not event or not event.meet_link:
+                return None
+            
+            meet_link = event.meet_link
+            
+            # Delete temp event
+            try:
+                self._client.delete_event(event_id=event.id, calendar_id="primary")
+            except:
+                pass
+            
+            return meet_link
+        except Exception as e:
+            logger.error(f"Failed to create quick Meet link: {e}")
+            return None
     
     async def _create_meet(self, **kwargs) -> str:
         """Create a new meeting with Google Meet link."""

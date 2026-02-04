@@ -278,6 +278,7 @@ class WhatsAppChannel(BaseChannel):
 *Google Calendar (eenvoudig):*
 /addgoogle <email> <app_password> - Add Google Calendar via App Password
 /googlehelp - Setup instructions for Google Calendar
+/googlemeet - Get a Google Meet link instantly
 
 *Other:*
 /cancel - Cancel active setup
@@ -420,6 +421,9 @@ Example: `/addbrave BSA1234567890abcdef`"""
         
         elif command == "/setupgoogle":
             return self._google_workspace_setup_help()
+        
+        elif command == "/googlemeet":
+            return self._create_quick_meet()
         
         return None  # Not a recognized command
     
@@ -673,6 +677,33 @@ Dit opent een browser voor handmatige login."""
         except Exception as e:
             logger.error(f"Error resetting LinkedIn: {e}")
             return f"❌ Error resetting LinkedIn: {e}"
+    
+    def _create_quick_meet(self) -> str:
+        """Create a quick Google Meet link."""
+        try:
+            from koda.core.tools.google_meet import GoogleMeetTool
+            meet_tool = GoogleMeetTool()
+            
+            if not meet_tool._available:
+                return """❌ **Google Workspace niet verbonden**
+
+Om Meet links te maken moet je eerst Google koppelen:
+1. Run `koda setup-google` in terminal
+2. Of gebruik `/setupgoogle` voor instructies"""
+            
+            meet_link = meet_tool.get_quick_meet_link()
+            
+            if meet_link:
+                return f"""🔗 *Google Meet Link*
+
+{meet_link}
+
+_Direct te gebruiken, verloopt niet._"""
+            else:
+                return "❌ Kon geen Meet link aanmaken. Controleer Google verbinding met `/googlestatus`"
+        except Exception as e:
+            logger.error(f"Failed to create Meet link: {e}")
+            return f"❌ Error: {e}"
     
     def _linkedin_status(self) -> str:
         """Check LinkedIn session status."""
