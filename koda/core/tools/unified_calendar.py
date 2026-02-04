@@ -337,9 +337,16 @@ _Technische fout is gelogd op de server._"""
                 try:
                     client = self._get_client_for_account(account)
                     calendars = client.list_calendars()
-                    for cal in calendars[:3]:  # Show first 3
-                        primary = " ⭐" if cal.get("primary") else ""
-                        output.append(f"  - {cal['summary']}{primary}")
+                    for cal in calendars[:5]:  # Show first 5
+                        # Handle both dict and dataclass
+                        if hasattr(cal, 'name'):
+                            cal_name = cal.name
+                            is_primary = cal.is_primary
+                        else:
+                            cal_name = cal.get('summary', cal.get('name', 'Unknown'))
+                            is_primary = cal.get('primary', False)
+                        primary = " ⭐" if is_primary else ""
+                        output.append(f"  - {cal_name}{primary}")
                 except Exception as e:
                     output.append(f"  ⚠️ Error: {e}")
             elif account_type == "exchange":
@@ -368,13 +375,32 @@ _Technische fout is gelogd op de server._"""
                     continue
                 
                 if account_type == "google":
+                    # GoogleWorkspaceClient uses list_events()
+                    now = datetime.now()
                     if today_only:
-                        events = client.get_today_events()
+                        time_max = now.replace(hour=23, minute=59, second=59)
                     else:
-                        events = client.get_upcoming_events(days=days)
+                        time_max = now + timedelta(days=days)
+                    
+                    # Use calendar_id="all" to get events from all calendars
+                    events = client.list_events(
+                        calendar_id="all",
+                        time_min=now,
+                        time_max=time_max
+                    )
                     for e in events:
-                        e["_account"] = account_name
-                        all_events.append(e)
+                        # Convert GoogleCalendarEvent dataclass to dict
+                        event_dict = {
+                            "_account": account_name,
+                            "id": e.id,
+                            "summary": e.summary,
+                            "start": e.start.isoformat() if e.start else "",
+                            "end": e.end.isoformat() if e.end else "",
+                            "location": e.location,
+                            "meet_link": e.meet_link,
+                            "calendar_name": e.calendar_name,
+                        }
+                        all_events.append(event_dict)
                 
                 elif account_type == "exchange":
                     if today_only:
