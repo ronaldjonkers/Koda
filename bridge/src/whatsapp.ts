@@ -98,11 +98,15 @@ export class WhatsAppClient {
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
         
+        // Log sock.user to see exact format
+        console.log('🔍 sock.user object:', JSON.stringify(this.sock.user, null, 2));
+        console.log('🔍 sock.user.id raw:', this.sock.user?.id);
+        
         // CRITICAL: Send presence update like OpenClaw does
         // This may be required for receiving messages
         try {
           await this.sock.sendPresenceUpdate('available');
-          console.log('� Sent presence update: available');
+          console.log('📡 Sent presence update: available');
         } catch (err) {
           console.error('Failed to send presence update:', err);
         }
@@ -118,9 +122,16 @@ export class WhatsAppClient {
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
+      // LOG EVERYTHING to diagnose
+      console.log(`\n🔔 messages.upsert EVENT FIRED!`);
+      console.log(`   Type: ${type}`);
+      console.log(`   Message count: ${messages?.length || 0}`);
+      console.log(`   Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 500));
+      
       // CRITICAL: Type 'append' is often used for self-messages
       // WhatsApp treats self-messages as sync actions, not regular incoming messages
       if (type !== 'notify' && type !== 'append') {
+        console.log(`   ↳ Skipping: type "${type}" not notify/append`);
         return;
       }
       
