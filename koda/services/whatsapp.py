@@ -769,8 +769,7 @@ Stuur 1 of 2:"""
                 config = Configuration(
                     server=data["server"],
                     credentials=credentials,
-                    version=version,
-                    auth_type='basic'  # Force basic auth
+                    version=version
                 )
                 account = Account(
                     primary_smtp_address=data["email"],
