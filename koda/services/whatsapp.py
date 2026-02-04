@@ -517,124 +517,429 @@ Of /cancel om te stoppen."""
         return None
     
     async def _handle_email_setup_step(self, phone: str, content: str, step: int, data: dict) -> str:
-        """Handle email setup steps."""
+        """Handle email setup steps with connection testing."""
         session = self._setup_sessions[phone]
         
         if step == 1:  # Type selection
             if content == "1":
                 data["type"] = "exchange"
                 session["step"] = 2
-                return "Stap 2/5: Wat is je email adres?"
+                return "Stap 1/7: Wat is je email adres?"
             elif content == "2":
                 data["type"] = "imap"
                 session["step"] = 2
-                return "Stap 2/5: Wat is de IMAP server? (bijv. imap.gmail.com)"
+                return "Stap 1/5: Wat is de IMAP server? (bijv. imap.gmail.com)"
             else:
                 return "❌ Kies 1 of 2, of /cancel om te stoppen."
         
-        elif step == 2:
-            if data["type"] == "exchange":
-                data["email"] = content
-                session["step"] = 3
-                return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
-            else:  # imap
-                data["host"] = content
-                session["step"] = 3
-                return "Stap 3/5: Wat is je gebruikersnaam/email?"
+        # EXCHANGE EMAIL FLOW
+        elif step == 2 and data["type"] == "exchange":
+            data["email"] = content
+            session["step"] = 3
+            return f"Stap 2/7: Wat is je gebruikersnaam?\n(Vaak hetzelfde als email, of DOMAIN\\\\username)\nStuur 'same' om {content} te gebruiken."
         
-        elif step == 3:
-            if data["type"] == "exchange":
-                data["password"] = content
-                session["step"] = 4
-                return "Stap 4/5: Wat is de server? (bijv. outlook.office365.com)\nOf stuur 'auto' voor autodiscover."
-            else:  # imap
-                data["username"] = content
-                session["step"] = 4
-                return "Stap 4/5: Wat is je wachtwoord? (of app-wachtwoord)"
+        elif step == 3 and data["type"] == "exchange":
+            data["username"] = data["email"] if content.lower() == "same" else content
+            session["step"] = 4
+            return "Stap 3/7: Wat is je wachtwoord? (of app-wachtwoord)"
         
-        elif step == 4:
-            if data["type"] == "exchange":
-                data["server"] = content if content.lower() != "auto" else ""
-                session["step"] = 5
-                return "Stap 5/5: Geef dit account een naam (bijv. 'Werk' of 'Persoonlijk'):"
-            else:  # imap
-                data["password"] = content
-                session["step"] = 5
-                return "Stap 5/5: Geef dit account een naam (bijv. 'Gmail' of 'Werk'):"
+        elif step == 4 and data["type"] == "exchange":
+            data["password"] = content
+            session["step"] = 5
+            return """Stap 4/7: Wil je autodiscover gebruiken?
+
+1️⃣ Ja, gebruik autodiscover (aanbevolen voor O365)
+2️⃣ Nee, ik voer de server handmatig in
+
+Stuur 1 of 2:"""
         
-        elif step == 5:
+        elif step == 5 and data["type"] == "exchange":
+            if content == "1":
+                data["use_autodiscover"] = True
+                data["server"] = ""
+                session["step"] = 7  # Skip server input
+                return "Stap 5/7: Geef dit account een naam (bijv. 'Werk'):"
+            elif content == "2":
+                data["use_autodiscover"] = False
+                session["step"] = 6
+                return "Stap 5/7: Wat is de Exchange server?\n(bijv. outlook.office365.com of mail.bedrijf.nl)"
+            else:
+                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+        
+        elif step == 6 and data["type"] == "exchange":
+            data["server"] = content
+            session["step"] = 7
+            return "Stap 6/7: Geef dit account een naam (bijv. 'Werk'):"
+        
+        elif step == 7 and data["type"] == "exchange":
             data["name"] = content
-            result = self._save_account_from_json("email", data)
+            session["step"] = 8
+            return await self._test_exchange_connection(phone, data, "email")
+        
+        elif step == 8 and data["type"] == "exchange":
+            # Handle retry options after failed test
+            return await self._handle_exchange_retry(phone, content, data, "email")
+        
+        elif step == 9 and data["type"] == "exchange":
+            # Ask about using same account for calendar
+            if content.lower() in ["ja", "yes", "j", "y", "1"]:
+                # Copy email account to calendar
+                result = self._save_exchange_for_both(data, "email")
+                del self._setup_sessions[phone]
+                return result
+            else:
+                result = self._save_account_from_data("email", data)
+                del self._setup_sessions[phone]
+                return result
+        
+        # IMAP EMAIL FLOW
+        elif step == 2 and data["type"] == "imap":
+            data["host"] = content
+            session["step"] = 3
+            return "Stap 2/5: Wat is je gebruikersnaam/email?"
+        
+        elif step == 3 and data["type"] == "imap":
+            data["username"] = content
+            session["step"] = 4
+            return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
+        
+        elif step == 4 and data["type"] == "imap":
+            data["password"] = content
+            session["step"] = 5
+            return "Stap 4/5: Geef dit account een naam (bijv. 'Gmail'):"
+        
+        elif step == 5 and data["type"] == "imap":
+            data["name"] = content
+            data["port"] = 993
+            data["use_ssl"] = True
+            result = self._save_account_from_data("email", data)
             del self._setup_sessions[phone]
             return result
         
         return None
     
     async def _handle_calendar_setup_step(self, phone: str, content: str, step: int, data: dict) -> str:
-        """Handle calendar setup steps."""
+        """Handle calendar setup steps with connection testing."""
         session = self._setup_sessions[phone]
         
         if step == 1:  # Type selection
             if content == "1":
                 data["type"] = "exchange"
                 session["step"] = 2
-                return "Stap 2/4: Wat is je email adres?"
+                return "Stap 1/7: Wat is je email adres?"
             elif content == "2":
                 data["type"] = "google"
-                session["step"] = 2
-                return """Stap 2/4: Google Calendar Setup
+                del self._setup_sessions[phone]
+                return """⚠️ *Google Calendar Setup*
 
-Google Calendar vereist OAuth authenticatie.
+Google Calendar vereist OAuth authenticatie via de browser.
+
 Run dit commando in je terminal:
 `koda setup --section calendar`
 
-Of gebruik CalDAV met een app-wachtwoord.
-/cancel om te stoppen."""
+Dit opent een browser voor Google login.
+
+_Setup via WhatsApp niet mogelijk voor Google._"""
             elif content == "3":
                 data["type"] = "caldav"
                 session["step"] = 2
-                return "Stap 2/4: Wat is de CalDAV URL?\n(bijv. https://caldav.icloud.com)"
+                return "Stap 1/5: Wat is de CalDAV URL?\n(bijv. https://caldav.icloud.com)"
             else:
                 return "❌ Kies 1, 2 of 3, of /cancel om te stoppen."
         
-        elif step == 2:
-            if data["type"] == "exchange":
-                data["email"] = content
-                session["step"] = 3
-                return "Stap 3/4: Wat is je wachtwoord? (of app-wachtwoord)"
-            else:  # caldav
-                data["url"] = content
-                session["step"] = 3
-                return "Stap 3/4: Wat is je gebruikersnaam?"
+        # EXCHANGE CALENDAR FLOW
+        elif step == 2 and data["type"] == "exchange":
+            data["email"] = content
+            session["step"] = 3
+            return f"Stap 2/7: Wat is je gebruikersnaam?\n(Vaak hetzelfde als email, of DOMAIN\\\\username)\nStuur 'same' om {content} te gebruiken."
         
-        elif step == 3:
-            if data["type"] == "exchange":
-                data["password"] = content
-                session["step"] = 4
-                return "Stap 4/4: Geef dit account een naam (bijv. 'Werk'):"
-            else:  # caldav
-                data["username"] = content
-                session["step"] = 4
-                return "Stap 3b/4: Wat is je wachtwoord? (of app-wachtwoord)"
+        elif step == 3 and data["type"] == "exchange":
+            data["username"] = data["email"] if content.lower() == "same" else content
+            session["step"] = 4
+            return "Stap 3/7: Wat is je wachtwoord? (of app-wachtwoord)"
         
-        elif step == 4:
-            if data["type"] == "exchange":
-                data["name"] = content
-                result = self._save_account_from_json("calendar", data)
+        elif step == 4 and data["type"] == "exchange":
+            data["password"] = content
+            session["step"] = 5
+            return """Stap 4/7: Wil je autodiscover gebruiken?
+
+1️⃣ Ja, gebruik autodiscover (aanbevolen voor O365)
+2️⃣ Nee, ik voer de server handmatig in
+
+Stuur 1 of 2:"""
+        
+        elif step == 5 and data["type"] == "exchange":
+            if content == "1":
+                data["use_autodiscover"] = True
+                data["server"] = ""
+                session["step"] = 7
+                return "Stap 5/7: Geef dit account een naam (bijv. 'Werk'):"
+            elif content == "2":
+                data["use_autodiscover"] = False
+                session["step"] = 6
+                return "Stap 5/7: Wat is de Exchange server?\n(bijv. outlook.office365.com of mail.bedrijf.nl)"
+            else:
+                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+        
+        elif step == 6 and data["type"] == "exchange":
+            data["server"] = content
+            session["step"] = 7
+            return "Stap 6/7: Geef dit account een naam (bijv. 'Werk'):"
+        
+        elif step == 7 and data["type"] == "exchange":
+            data["name"] = content
+            session["step"] = 8
+            return await self._test_exchange_connection(phone, data, "calendar")
+        
+        elif step == 8 and data["type"] == "exchange":
+            return await self._handle_exchange_retry(phone, content, data, "calendar")
+        
+        elif step == 9 and data["type"] == "exchange":
+            # Ask about using same account for email
+            if content.lower() in ["ja", "yes", "j", "y", "1"]:
+                result = self._save_exchange_for_both(data, "calendar")
                 del self._setup_sessions[phone]
                 return result
-            else:  # caldav - this is password step
-                data["password"] = content
-                session["step"] = 5
-                return "Stap 4/4: Geef dit account een naam:"
+            else:
+                result = self._save_account_from_data("calendar", data)
+                del self._setup_sessions[phone]
+                return result
         
-        elif step == 5:  # caldav name
+        # CALDAV FLOW
+        elif step == 2 and data["type"] == "caldav":
+            data["url"] = content
+            session["step"] = 3
+            return "Stap 2/5: Wat is je gebruikersnaam?"
+        
+        elif step == 3 and data["type"] == "caldav":
+            data["username"] = content
+            session["step"] = 4
+            return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
+        
+        elif step == 4 and data["type"] == "caldav":
+            data["password"] = content
+            session["step"] = 5
+            return "Stap 4/5: Geef dit account een naam:"
+        
+        elif step == 5 and data["type"] == "caldav":
             data["name"] = content
-            result = self._save_account_from_json("calendar", data)
+            result = self._save_account_from_data("calendar", data)
             del self._setup_sessions[phone]
             return result
         
         return None
+    
+    async def _test_exchange_connection(self, phone: str, data: dict, account_type: str) -> str:
+        """Test Exchange connection and return result."""
+        session = self._setup_sessions[phone]
+        
+        logger.info(f"Testing Exchange connection for {data.get('email')}...")
+        
+        try:
+            from exchangelib import Credentials, Account, Configuration, DELEGATE
+            from exchangelib.errors import UnauthorizedError, TransportError
+            
+            credentials = Credentials(
+                username=data.get("username", data.get("email")),
+                password=data.get("password")
+            )
+            
+            if data.get("use_autodiscover", False) or not data.get("server"):
+                # Use autodiscover
+                logger.info("Using autodiscover...")
+                account = Account(
+                    primary_smtp_address=data["email"],
+                    credentials=credentials,
+                    autodiscover=True,
+                    access_type=DELEGATE
+                )
+            else:
+                # Manual server
+                logger.info(f"Connecting to server: {data['server']}")
+                config = Configuration(
+                    server=data["server"],
+                    credentials=credentials
+                )
+                account = Account(
+                    primary_smtp_address=data["email"],
+                    credentials=credentials,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE
+                )
+            
+            # Test by accessing inbox/calendar
+            if account_type == "email":
+                _ = account.inbox.total_count
+            else:
+                _ = account.calendar.all()[:1]
+            
+            logger.info("Exchange connection successful!")
+            session["step"] = 9
+            
+            other_type = "agenda" if account_type == "email" else "email"
+            return f"""✅ *Verbinding geslaagd!*
+
+Account: {data['name']}
+Email: {data['email']}
+Server: {data.get('server') or 'autodiscover'}
+
+Wil je dit account ook gebruiken voor *{other_type}*?
+(Ja/Nee)"""
+        
+        except ImportError:
+            logger.error("exchangelib not installed")
+            session["step"] = 8
+            session["last_error"] = "exchangelib niet geïnstalleerd"
+            return self._format_exchange_error("exchangelib library niet gevonden. Run: pip install exchangelib", data)
+        
+        except UnauthorizedError as e:
+            logger.error(f"Exchange auth error: {e}")
+            session["step"] = 8
+            session["last_error"] = str(e)
+            return self._format_exchange_error("Authenticatie mislukt. Controleer email/gebruikersnaam en wachtwoord.", data)
+        
+        except TransportError as e:
+            logger.error(f"Exchange transport error: {e}")
+            session["step"] = 8
+            session["last_error"] = str(e)
+            return self._format_exchange_error(f"Kan geen verbinding maken met server: {e}", data)
+        
+        except Exception as e:
+            logger.error(f"Exchange error: {type(e).__name__}: {e}")
+            session["step"] = 8
+            session["last_error"] = str(e)
+            return self._format_exchange_error(f"{type(e).__name__}: {e}", data)
+    
+    def _format_exchange_error(self, error: str, data: dict) -> str:
+        """Format Exchange error message with retry options."""
+        return f"""❌ *Verbinding mislukt*
+
+Fout: {error}
+
+*Huidige instellingen:*
+• Email: {data.get('email', '-')}
+• Gebruikersnaam: {data.get('username', '-')}
+• Server: {data.get('server') or 'autodiscover'}
+
+*Wat wil je doen?*
+1️⃣ Email wijzigen
+2️⃣ Gebruikersnaam wijzigen
+3️⃣ Wachtwoord wijzigen
+4️⃣ Server wijzigen
+5️⃣ Autodiscover aan/uit
+6️⃣ Opnieuw proberen
+7️⃣ Stoppen (/cancel)
+
+Stuur een nummer:"""
+    
+    async def _handle_exchange_retry(self, phone: str, content: str, data: dict, account_type: str) -> str:
+        """Handle retry options after failed Exchange connection."""
+        session = self._setup_sessions[phone]
+        
+        if content == "1":
+            session["retry_field"] = "email"
+            return "Voer het nieuwe email adres in:"
+        elif content == "2":
+            session["retry_field"] = "username"
+            return "Voer de nieuwe gebruikersnaam in:"
+        elif content == "3":
+            session["retry_field"] = "password"
+            return "Voer het nieuwe wachtwoord in:"
+        elif content == "4":
+            session["retry_field"] = "server"
+            return "Voer de nieuwe server in (bijv. outlook.office365.com):"
+        elif content == "5":
+            data["use_autodiscover"] = not data.get("use_autodiscover", False)
+            status = "AAN" if data["use_autodiscover"] else "UIT"
+            return f"Autodiscover staat nu *{status}*. Stuur 6 om opnieuw te proberen."
+        elif content == "6":
+            return await self._test_exchange_connection(phone, data, account_type)
+        elif content == "7" or content.lower() == "/cancel":
+            del self._setup_sessions[phone]
+            return "✅ Setup geannuleerd."
+        elif "retry_field" in session:
+            # User is providing new value for a field
+            field = session.pop("retry_field")
+            data[field] = content
+            return await self._test_exchange_connection(phone, data, account_type)
+        else:
+            return "❌ Kies een nummer (1-7):"
+    
+    def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
+        """Save Exchange account for both email and calendar."""
+        config = load_config()
+        
+        try:
+            account_data = {
+                "name": data.get("name", "Exchange"),
+                "type": "exchange",
+                "enabled": True,
+                "email": data.get("email"),
+                "username": data.get("username"),
+                "password": data.get("password"),
+                "server": data.get("server", ""),
+                "use_autodiscover": data.get("use_autodiscover", False)
+            }
+            
+            # Add to email accounts
+            if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
+                config.integrations.email_accounts = []
+            config.integrations.email_accounts.append(account_data.copy())
+            
+            # Add to calendar accounts
+            if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
+                config.integrations.calendar_accounts = []
+            config.integrations.calendar_accounts.append(account_data.copy())
+            
+            save_config(config)
+            
+            return f"""✅ *Exchange account toegevoegd!*
+
+Account *{data['name']}* is geconfigureerd voor:
+• 📧 Email
+• 📅 Agenda
+
+Gebruik /accounts om je accounts te bekijken."""
+        
+        except Exception as e:
+            logger.error(f"Error saving Exchange account: {e}")
+            return f"❌ Fout bij opslaan: {e}"
+    
+    def _save_account_from_data(self, account_type: str, data: dict) -> str:
+        """Save account from setup data."""
+        config = load_config()
+        
+        try:
+            name = data.get("name", "Account")
+            acc_type = data.get("type", "unknown")
+            
+            account_data = {
+                "name": name,
+                "type": acc_type,
+                "enabled": True,
+            }
+            
+            # Copy relevant fields
+            for key in ["email", "username", "password", "server", "host", "port", "url", "use_ssl", "use_autodiscover"]:
+                if key in data:
+                    account_data[key] = data[key]
+            
+            if account_type == "email":
+                if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
+                    config.integrations.email_accounts = []
+                config.integrations.email_accounts.append(account_data)
+            else:
+                if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
+                    config.integrations.calendar_accounts = []
+                config.integrations.calendar_accounts.append(account_data)
+            
+            save_config(config)
+            return f"✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd!"
+        
+        except Exception as e:
+            logger.error(f"Error saving account: {e}")
+            return f"❌ Fout bij opslaan: {e}"
     
     def _save_account_from_json(self, account_type: str, data: dict) -> str:
         """Save account from JSON data."""
