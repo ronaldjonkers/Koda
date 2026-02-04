@@ -1298,5 +1298,79 @@ def status():
         console.print(f"vLLM/Local: {vllm_status}")
 
 
+# ============================================================================
+# Daemon Commands
+# ============================================================================
+
+daemon_app = typer.Typer(help="Manage Koda as a system daemon")
+app.add_typer(daemon_app, name="daemon")
+
+
+@daemon_app.command("install")
+def daemon_install():
+    """Install Koda as a system daemon (auto-start on login)."""
+    from koda.daemon import install_daemon
+    install_daemon()
+
+
+@daemon_app.command("uninstall")
+def daemon_uninstall():
+    """Uninstall the Koda daemon."""
+    from koda.daemon import uninstall_daemon
+    uninstall_daemon()
+
+
+@daemon_app.command("start")
+def daemon_start():
+    """Start the Koda daemon."""
+    from koda.daemon import DaemonManager
+    manager = DaemonManager()
+    success, message = manager.start()
+    if success:
+        console.print(f"[green]✓[/green] {message}")
+    else:
+        console.print(f"[red]✗[/red] {message}")
+
+
+@daemon_app.command("stop")
+def daemon_stop():
+    """Stop the Koda daemon."""
+    from koda.daemon import DaemonManager
+    manager = DaemonManager()
+    success, message = manager.stop()
+    if success:
+        console.print(f"[green]✓[/green] {message}")
+    else:
+        console.print(f"[red]✗[/red] {message}")
+
+
+@daemon_app.command("restart")
+def daemon_restart():
+    """Restart the Koda daemon."""
+    from koda.daemon import DaemonManager
+    manager = DaemonManager()
+    success, message = manager.restart()
+    if success:
+        console.print(f"[green]✓[/green] {message}")
+    else:
+        console.print(f"[red]✗[/red] {message}")
+
+
+@daemon_app.command("status")
+def daemon_status_cmd():
+    """Show daemon status."""
+    from koda.daemon import daemon_status
+    daemon_status()
+
+
+@daemon_app.command("logs")
+def daemon_logs_cmd(
+    lines: int = typer.Option(50, "--lines", "-n", help="Number of lines to show")
+):
+    """Show daemon logs."""
+    from koda.daemon import daemon_logs
+    daemon_logs(lines)
+
+
 if __name__ == "__main__":
     app()
