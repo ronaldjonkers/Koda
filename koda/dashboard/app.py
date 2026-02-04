@@ -232,19 +232,153 @@ def create_app() -> FastAPI:
             config = load_config()
             accounts = []
             
+            # Get accounts from integrations.accounts list
             for acc in (config.integrations.accounts or []):
+                if hasattr(acc, 'model_dump'):
+                    acc_dict = acc.model_dump()
+                elif isinstance(acc, dict):
+                    acc_dict = acc
+                else:
+                    acc_dict = {}
+                
                 acc_data = {
-                    "name": getattr(acc, 'name', acc.get('name', 'Unknown')) if hasattr(acc, 'name') or isinstance(acc, dict) else 'Unknown',
-                    "type": getattr(acc, 'type', acc.get('type', 'unknown')) if hasattr(acc, 'type') or isinstance(acc, dict) else 'unknown',
-                    "enabled": getattr(acc, 'enabled', acc.get('enabled', True)) if hasattr(acc, 'enabled') or isinstance(acc, dict) else True,
-                    "capabilities": getattr(acc, 'capabilities', acc.get('capabilities', [])) if hasattr(acc, 'capabilities') or isinstance(acc, dict) else [],
-                    "email": getattr(acc, 'email', acc.get('email', '')) if hasattr(acc, 'email') or isinstance(acc, dict) else ''
+                    "name": acc_dict.get('name', 'Unknown'),
+                    "type": acc_dict.get('type', 'unknown'),
+                    "enabled": acc_dict.get('enabled', True),
+                    "capabilities": acc_dict.get('capabilities', []),
+                    "email": acc_dict.get('email', ''),
+                    "server": acc_dict.get('server', '')
                 }
                 accounts.append(acc_data)
             
-            return {"accounts": accounts}
+            # Also check legacy exchange config
+            if config.integrations.exchange.enabled:
+                accounts.append({
+                    "name": "Exchange (legacy)",
+                    "type": "exchange",
+                    "enabled": True,
+                    "capabilities": ["email", "calendar", "contacts"],
+                    "email": config.integrations.exchange.email,
+                    "server": config.integrations.exchange.server
+                })
+            
+            return {"accounts": accounts, "count": len(accounts)}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/api/accounts")
+    async def add_account(request: Request):
+        """Add a new account."""
+        try:
+            from koda.config.loader import load_config, save_config
+            data = await request.json()
+            
+            account = {
+                "name": data.get("name", ""),
+                "type": data.get("type", ""),
+                "enabled": True,
+                "email": data.get("email", ""),
+                "password": data.get("password", ""),
+                "server": data.get("server", ""),
+                "capabilities": data.get("capabilities", [])
+            }
+            
+            # Validate required fields
+            if not account["name"] or not account["type"] or not account["email"]:
+                raise HTTPException(status_code=400, detail="name, type, and email are required")
+            
+            config = load_config()
+            if not config.integrations.accounts:
+                config.integrations.accounts = []
+            
+            # Check if account already exists
+            for i, acc in enumerate(config.integrations.accounts):
+                acc_email = getattr(acc, 'email', acc.get('email', '')) if hasattr(acc, 'email') or isinstance(acc, dict) else ''
+                if acc_email == account["email"]:
+                    config.integrations.accounts[i] = account
+                    save_config(config)
+                    return {"status": "updated", "account": account["name"]}
+            
+            config.integrations.accounts.append(account)
+            save_config(config)
+            return {"status": "created", "account": account["name"]}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.delete("/api/accounts/{email}")
+    async def delete_account(email: str):
+        """Delete an account by email."""
+        try:
+            from koda.config.loader import load_config, save_config
+            from urllib.parse import unquote
+            
+            email = unquote(email)
+            config = load_config()
+            
+            if not config.integrations.accounts:
+                raise HTTPException(status_code=404, detail="No accounts found")
+            
+            original_count = len(config.integrations.accounts)
+            config.integrations.accounts = [
+                acc for acc in config.integrations.accounts
+                if (getattr(acc, 'email', acc.get('email', '')) if hasattr(acc, 'email') or isinstance(acc, dict) else '') != email
+            ]
+            
+            if len(config.integrations.accounts) < original_count:
+                save_config(config)
+                return {"status": "deleted", "email": email}
+            
+            raise HTTPException(status_code=404, detail="Account not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/system-metrics")
+    async def get_system_metrics():
+        """Get system metrics (CPU, memory, load)."""
+        try:
+            import os
+            metrics = {
+                "cpu_percent": 0,
+                "memory_percent": 0,
+                "memory_used_mb": 0,
+                "memory_total_mb": 0,
+                "load_1m": 0,
+                "load_5m": 0,
+                "load_15m": 0,
+                "process_memory_mb": 0
+            }
+            
+            # Try to get system metrics with psutil if available
+            try:
+                import psutil
+                metrics["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+                mem = psutil.virtual_memory()
+                metrics["memory_percent"] = mem.percent
+                metrics["memory_used_mb"] = round(mem.used / 1024 / 1024)
+                metrics["memory_total_mb"] = round(mem.total / 1024 / 1024)
+                
+                # Process memory
+                process = psutil.Process(os.getpid())
+                metrics["process_memory_mb"] = round(process.memory_info().rss / 1024 / 1024)
+            except ImportError:
+                pass
+            
+            # Load average (Unix only)
+            try:
+                load = os.getloadavg()
+                metrics["load_1m"] = round(load[0], 2)
+                metrics["load_5m"] = round(load[1], 2)
+                metrics["load_15m"] = round(load[2], 2)
+            except (OSError, AttributeError):
+                pass
+            
+            return metrics
+        except Exception as e:
+            return {"error": str(e)}
     
     @app.get("/api/schedules")
     async def get_schedules():
@@ -527,7 +661,27 @@ def get_dashboard_html() -> str:
     </nav>
 
     <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <!-- Metrics Row -->
+        <!-- System Metrics Row -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div class="card stat-card">
+                <div class="stat-value text-blue-600" id="sys-cpu">0%</div>
+                <div class="stat-label">CPU</div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-value text-green-600" id="sys-memory">0%</div>
+                <div class="stat-label">Memory</div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-value text-purple-600" id="sys-load">0.0</div>
+                <div class="stat-label">Load (1m)</div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-value text-orange-600" id="sys-process">0 MB</div>
+                <div class="stat-label">Koda Memory</div>
+            </div>
+        </div>
+
+        <!-- App Metrics Row -->
         <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
             <div class="card stat-card">
                 <div class="stat-value text-blue-600" id="stat-messages">0</div>
@@ -714,10 +868,61 @@ def get_dashboard_html() -> str:
 
         <!-- Accounts Tab -->
         <div id="tab-accounts" class="tab-content hidden">
-            <div class="card">
-                <h2 class="text-lg font-semibold mb-4">📧 Configured Accounts</h2>
-                <div id="accounts-list" class="space-y-3">
-                    <p class="text-gray-500">Loading...</p>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">📧 Configured Accounts</h2>
+                    <div id="accounts-list" class="space-y-3">
+                        <p class="text-gray-500">Loading...</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2 class="text-lg font-semibold mb-4">➕ Add Account</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                            <input id="acc-name" type="text" class="input" placeholder="Work Email">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                            <select id="acc-type" class="input" onchange="updateAccountFields()">
+                                <option value="exchange">Exchange / Office 365</option>
+                                <option value="google_caldav">Google (CalDAV)</option>
+                                <option value="imap">IMAP (Email only)</option>
+                                <option value="caldav">CalDAV (Calendar only)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                            <input id="acc-email" type="email" class="input" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password / App Password</label>
+                            <input id="acc-password" type="password" class="input" placeholder="••••••••">
+                        </div>
+                        <div id="acc-server-field">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Server (Exchange only)</label>
+                            <input id="acc-server" type="text" class="input" placeholder="outlook.office365.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Capabilities</label>
+                            <div class="flex space-x-4">
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="acc-cap-email" class="w-4 h-4 text-blue-600 rounded" checked>
+                                    <span class="ml-2 text-sm">Email</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="acc-cap-calendar" class="w-4 h-4 text-blue-600 rounded" checked>
+                                    <span class="ml-2 text-sm">Calendar</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="acc-cap-contacts" class="w-4 h-4 text-blue-600 rounded">
+                                    <span class="ml-2 text-sm">Contacts</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button onclick="addAccount()" class="btn btn-primary">➕ Add Account</button>
+                        <p id="acc-status" class="text-sm"></p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -860,19 +1065,20 @@ def get_dashboard_html() -> str:
                 if (data.accounts?.length) {
                     list.innerHTML = data.accounts.map(acc => `
                         <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                            <div>
+                            <div class="flex-1">
                                 <span class="font-medium">${acc.name}</span>
                                 <span class="ml-2 badge badge-blue">${acc.type}</span>
-                                ${acc.email ? '<span class="ml-2 text-sm text-gray-500">' + acc.email + '</span>' : ''}
+                                ${acc.email ? '<div class="text-sm text-gray-500 mt-1">' + acc.email + (acc.server ? ' (' + acc.server + ')' : '') + '</div>' : ''}
+                                ${acc.capabilities?.length ? '<div class="text-xs text-gray-400 mt-1">' + acc.capabilities.join(', ') + '</div>' : ''}
                             </div>
                             <div class="flex items-center space-x-2">
                                 <span class="badge ${acc.enabled ? 'badge-green' : 'badge-red'}">${acc.enabled ? 'Active' : 'Disabled'}</span>
-                                ${acc.capabilities?.length ? '<span class="text-xs text-gray-400">' + acc.capabilities.join(', ') + '</span>' : ''}
+                                <button onclick="deleteAccount('${acc.email}')" class="text-red-600 hover:text-red-800 text-sm">🗑️</button>
                             </div>
                         </div>
                     `).join('');
                 } else {
-                    list.innerHTML = '<div class="text-center py-8 text-gray-500"><p>No accounts configured yet.</p><p class="text-sm mt-2">Use WhatsApp commands like /addmail or /addgoogle to add accounts.</p></div>';
+                    list.innerHTML = '<div class="text-center py-8 text-gray-500"><p>No accounts configured yet.</p><p class="text-sm mt-2">Add an account using the form on the right.</p></div>';
                 }
             } catch (e) {
                 console.error('Failed to load accounts:', e);
@@ -1029,12 +1235,96 @@ def get_dashboard_html() -> str:
             if (name === 'integrations') loadConfig();
         }
 
+        async function loadSystemMetrics() {
+            try {
+                const res = await fetch('/api/system-metrics');
+                const data = await res.json();
+                
+                document.getElementById('sys-cpu').textContent = data.cpu_percent + '%';
+                document.getElementById('sys-memory').textContent = data.memory_percent + '%';
+                document.getElementById('sys-load').textContent = data.load_1m;
+                document.getElementById('sys-process').textContent = data.process_memory_mb + ' MB';
+            } catch (e) {
+                console.error('Failed to load system metrics:', e);
+            }
+        }
+
+        async function addAccount() {
+            const status = document.getElementById('acc-status');
+            const capabilities = [];
+            if (document.getElementById('acc-cap-email').checked) capabilities.push('email');
+            if (document.getElementById('acc-cap-calendar').checked) capabilities.push('calendar');
+            if (document.getElementById('acc-cap-contacts').checked) capabilities.push('contacts');
+            
+            const account = {
+                name: document.getElementById('acc-name').value,
+                type: document.getElementById('acc-type').value,
+                email: document.getElementById('acc-email').value,
+                password: document.getElementById('acc-password').value,
+                server: document.getElementById('acc-server').value,
+                capabilities: capabilities
+            };
+            
+            if (!account.name || !account.email) {
+                status.textContent = '❌ Name and email are required';
+                status.className = 'text-sm text-red-600';
+                return;
+            }
+            
+            status.textContent = '⏳ Adding account...';
+            status.className = 'text-sm text-blue-600';
+            
+            try {
+                const res = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(account)
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    status.textContent = '✅ Account ' + data.status + ': ' + account.name;
+                    status.className = 'text-sm text-green-600';
+                    loadAccounts();
+                    // Clear form
+                    document.getElementById('acc-name').value = '';
+                    document.getElementById('acc-email').value = '';
+                    document.getElementById('acc-password').value = '';
+                } else {
+                    status.textContent = '❌ ' + data.detail;
+                    status.className = 'text-sm text-red-600';
+                }
+            } catch (e) {
+                status.textContent = '❌ Error: ' + e.message;
+                status.className = 'text-sm text-red-600';
+            }
+        }
+
+        async function deleteAccount(email) {
+            if (!confirm('Delete account ' + email + '?')) return;
+            try {
+                const res = await fetch('/api/accounts/' + encodeURIComponent(email), { method: 'DELETE' });
+                if (res.ok) loadAccounts();
+                else alert('Failed to delete account');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function updateAccountFields() {
+            const type = document.getElementById('acc-type').value;
+            const serverField = document.getElementById('acc-server-field');
+            serverField.style.display = type === 'exchange' ? 'block' : 'none';
+        }
+
         // Auto-refresh status every 30 seconds
         setInterval(loadStatus, 30000);
+        setInterval(loadSystemMetrics, 10000);
         
         // Initial load
         loadStatus();
         loadConfig();
+        loadSystemMetrics();
     </script>
 </body>
 </html>'''

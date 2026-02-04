@@ -177,6 +177,9 @@ koda agent -m "What's on my calendar today?"
 |---------|-------------|
 | `koda onboard` | Run interactive setup wizard |
 | `koda gateway` | Start the main Koda service (messaging, cron, webhooks) |
+| `koda dashboard` | Start the web dashboard (http://localhost:8081) |
+| `koda daemon install` | Install Koda as a system service (auto-start on login) |
+| `koda daemon status` | Check daemon status |
 | `koda agent -m "..."` | Chat with the AI assistant |
 | `koda config [section]` | Configure a specific section (assistant, provider, calendar, email, whatsapp, telegram) |
 | `koda status` | Show current configuration and connection status |

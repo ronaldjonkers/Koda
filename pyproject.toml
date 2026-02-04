@@ -58,6 +58,8 @@ dependencies = [
     "trafilatura>=1.6.0",        # Better content extraction than readability
     # Browser automation
     "playwright>=1.40.0",        # For web automation, form filling, purchases
+    # System monitoring
+    "psutil>=5.9.0",             # CPU, memory, process monitoring for dashboard
     # Weather
     "python-weather>=2.0.0",     # Weather forecasts
 ]

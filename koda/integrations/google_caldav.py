@@ -133,6 +133,13 @@ Of via config.json:
             if "401" in error_msg or "Unauthorized" in error_msg:
                 logger.error("Authentication failed. Check your email and app password.")
                 logger.error("Make sure 2FA is enabled and you're using an App Password, not your regular password.")
+                logger.error("Note: Google Workspace accounts may have CalDAV disabled by admin.")
+                logger.error("Tip: Try generating a NEW App Password at https://myaccount.google.com/apppasswords")
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                logger.error("Access forbidden. CalDAV access might be disabled for your account.")
+                logger.error("For Google Workspace: Ask your admin to enable CalDAV access.")
+            elif "404" in error_msg:
+                logger.error("CalDAV endpoint not found. Make sure the email address is correct.")
             else:
                 logger.error(f"Google CalDAV connection failed: {e}")
             return False
