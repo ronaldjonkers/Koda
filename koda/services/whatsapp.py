@@ -924,6 +924,8 @@ Account *{data['name']}* is geconfigureerd voor:
 • 📧 Email
 • 📅 Agenda
 
+⚠️ *Herstart `koda gateway` om het account te activeren.*
+
 Gebruik /accounts om je accounts te bekijken."""
         
         except Exception as e:
@@ -959,7 +961,9 @@ Gebruik /accounts om je accounts te bekijken."""
                 config.integrations.calendar_accounts.append(account_data)
             
             save_config(config)
-            return f"✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd!"
+            return f"""✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd!
+
+⚠️ *Herstart `koda gateway` om het account te activeren.*"""
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
