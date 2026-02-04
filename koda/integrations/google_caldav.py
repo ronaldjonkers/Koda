@@ -59,6 +59,8 @@ class GoogleCalDAVClient:
 
 Dit is de eenvoudigste manier om Google Calendar te koppelen - geen API keys of OAuth nodig!
 
+📖 **Uitgebreide handleiding:** https://support.google.com/mail/answer/185833
+
 ### Stap 1: 2-Stapsverificatie Inschakelen
 1. Ga naar https://myaccount.google.com/security
 2. Zorg dat "2-Stapsverificatie" is ingeschakeld

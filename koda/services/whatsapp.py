@@ -101,6 +101,12 @@ class WhatsAppChannel(BaseChannel):
             await self._ws.close()
             self._ws = None
     
+    def reload_config(self, new_config) -> None:
+        """Reload configuration without restarting the channel."""
+        self.config = new_config
+        self._load_contact_rules()
+        logger.info("WhatsApp config reloaded (allow_from, contact_rules, etc.)")
+    
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
@@ -612,6 +618,9 @@ Met deze methode koppel je Google Calendar zonder API keys of OAuth - net zo sim
 Ga naar myaccount.google.com/security en zorg dat 2-Stapsverificatie AAN staat.
 
 *Stap 2: App Wachtwoord Maken*
+📖 Uitgebreide handleiding: https://support.google.com/mail/answer/185833
+
+Kort:
 1. Ga naar: myaccount.google.com/apppasswords
 2. Klik "App selecteren" → "Overige (aangepaste naam)"
 3. Type: "Koda"

@@ -214,6 +214,10 @@ def create_app() -> FastAPI:
 Ga naar https://myaccount.google.com/security en zorg dat 2-Stapsverificatie AAN staat.
 
 ### Stap 2: App Wachtwoord Aanmaken
+
+📖 **Uitgebreide handleiding:** https://support.google.com/mail/answer/185833
+
+Kort:
 1. Ga naar https://myaccount.google.com/apppasswords
 2. Klik "App selecteren" → "Overige (aangepaste naam)"
 3. Type: "Koda"

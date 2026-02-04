@@ -809,6 +809,22 @@ def gateway(
     if email_sender:
         console.print(f"[green]✓[/green] Email reminders: {reminder_config.email.from_email}")
     
+    # Start config file watcher for auto-reload
+    from koda.config.watcher import start_config_watcher, stop_config_watcher
+    
+    def on_config_reload():
+        """Handle config file changes."""
+        try:
+            new_config = load_config()
+            # Update channel manager config
+            channels.reload_config(new_config)
+            logger.info("Configuration reloaded successfully")
+        except Exception as e:
+            logger.error(f"Config reload failed: {e}")
+    
+    config_watcher = start_config_watcher(on_reload=on_config_reload)
+    console.print(f"[green]✓[/green] Config watcher: auto-reload on changes")
+    
     async def run():
         try:
             await cron.start()
@@ -824,6 +840,7 @@ def gateway(
             pass
         finally:
             console.print("\nShutting down...")
+            stop_config_watcher()
             heartbeat.stop()
             cron.stop()
             reminder_service.stop()

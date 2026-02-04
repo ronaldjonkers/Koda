@@ -154,3 +154,24 @@ class ChannelManager:
     def enabled_channels(self) -> list[str]:
         """Get list of enabled channel names."""
         return list(self.channels.keys())
+    
+    def reload_config(self, new_config: Config) -> None:
+        """
+        Reload configuration without restarting channels.
+        
+        Updates config for running channels so they pick up changes
+        like allow_from, bot_mode, contact_rules, etc.
+        """
+        self.config = new_config
+        
+        # Update each channel's config
+        for name, channel in self.channels.items():
+            try:
+                if name == "whatsapp" and hasattr(channel, 'reload_config'):
+                    channel.reload_config(new_config.channels.whatsapp)
+                    logger.info(f"Reloaded config for {name} channel")
+                elif name == "telegram" and hasattr(channel, 'reload_config'):
+                    channel.reload_config(new_config.channels.telegram)
+                    logger.info(f"Reloaded config for {name} channel")
+            except Exception as e:
+                logger.error(f"Error reloading config for {name}: {e}")
