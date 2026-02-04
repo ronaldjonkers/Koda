@@ -308,6 +308,15 @@ setup_koda() {
     fi
     print_success "Koda installed"
     
+    # Install Playwright browsers (for browser automation)
+    print_step "Installing Playwright browsers..."
+    if python3 -c "import playwright" 2>/dev/null; then
+        playwright install chromium 2>/dev/null || python3 -m playwright install chromium 2>/dev/null || true
+        print_success "Playwright browsers installed"
+    else
+        print_warning "Playwright not available, skipping browser install"
+    fi
+    
     # Build WhatsApp bridge
     if [[ -d "bridge" ]]; then
         print_step "Building WhatsApp bridge..."
