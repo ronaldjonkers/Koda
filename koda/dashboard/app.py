@@ -304,6 +304,23 @@ def create_app() -> FastAPI:
                     "server": config.integrations.exchange.server
                 })
             
+            # Auto-detect Google Workspace if authorized
+            try:
+                from koda.integrations.google_workspace import GoogleWorkspaceClient
+                gw_client = GoogleWorkspaceClient()
+                gw_status = gw_client.get_status()
+                if gw_status.get("authorized"):
+                    accounts.insert(0, {
+                        "name": "Google Workspace",
+                        "type": "google",
+                        "enabled": True,
+                        "capabilities": ["email", "calendar"],
+                        "email": gw_status.get("email", ""),
+                        "auto_detected": True
+                    })
+            except Exception:
+                pass
+            
             return {"accounts": accounts, "count": len(accounts)}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -702,6 +719,50 @@ Vul je Gmail adres en het 16-letter App Wachtwoord in het formulier hieronder in
                 raise HTTPException(status_code=400, detail=message)
         except HTTPException:
             raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/contacts/status")
+    async def contacts_status():
+        """Get contacts (iCloud/macOS) status."""
+        try:
+            from koda.integrations.icloud_contacts import ICloudContactsClient
+            client = ICloudContactsClient(use_local=True)
+            
+            # Try to get contacts count
+            contacts = client.get_all_contacts()
+            contacts_with_birthdays = [c for c in contacts if c.get("birthday")]
+            
+            return {
+                "available": True,
+                "source": "macOS Contacts",
+                "total_contacts": len(contacts),
+                "contacts_with_birthdays": len(contacts_with_birthdays),
+                "message": f"✅ {len(contacts)} contacten gevonden, {len(contacts_with_birthdays)} met verjaardag"
+            }
+        except Exception as e:
+            logger.debug(f"Contacts check: {e}")
+            return {
+                "available": False,
+                "source": "macOS Contacts",
+                "total_contacts": 0,
+                "contacts_with_birthdays": 0,
+                "message": f"❌ Contacts niet beschikbaar: {e}"
+            }
+    
+    @app.get("/api/contacts/birthdays")
+    async def contacts_birthdays(days: int = 30):
+        """Get upcoming birthdays."""
+        try:
+            from koda.integrations.icloud_contacts import ICloudContactsClient
+            client = ICloudContactsClient(use_local=True)
+            
+            birthdays = client.get_upcoming_birthdays(days=days)
+            return {
+                "upcoming": birthdays,
+                "count": len(birthdays),
+                "days_ahead": days
+            }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -1109,6 +1170,20 @@ def get_dashboard_html() -> str:
                     <h3 class="font-semibold mb-2">📆 CalDAV</h3>
                     <p id="int-caldav" class="text-sm text-gray-600">Loading...</p>
                 </div>
+                <div class="card">
+                    <h3 class="font-semibold mb-2">👥 Contacts (macOS)</h3>
+                    <p id="int-contacts" class="text-sm text-gray-600">Loading...</p>
+                </div>
+            </div>
+            
+            <!-- Contacts & Birthdays Section -->
+            <div class="card mt-6">
+                <h2 class="text-lg font-semibold mb-4">🎂 Verjaardagen</h2>
+                <div id="birthdays-section">
+                    <p class="text-gray-500 mb-4">Loading contacts...</p>
+                </div>
+                <div id="birthdays-list" class="space-y-2 mt-4">
+                </div>
             </div>
         </div>
 
@@ -1439,8 +1514,52 @@ def get_dashboard_html() -> str:
             
             if (name === 'accounts') loadAccounts();
             if (name === 'schedules') loadSchedules();
-            if (name === 'integrations') loadConfig();
+            if (name === 'integrations') { loadConfig(); loadContactsStatus(); loadBirthdays(); }
             if (name === 'google') loadGoogleWorkspaceStatus();
+        }
+        
+        async function loadContactsStatus() {
+            try {
+                const res = await fetch('/api/contacts/status');
+                const data = await res.json();
+                const el = document.getElementById('int-contacts');
+                const section = document.getElementById('birthdays-section');
+                
+                if (data.available) {
+                    el.innerHTML = `<span class="text-green-600">✅ ${data.total_contacts} contacten, ${data.contacts_with_birthdays} met verjaardag</span>`;
+                    section.innerHTML = `
+                        <p class="text-green-600">${data.message}</p>
+                        <p class="text-sm text-gray-500 mt-2">Contacten worden uitgelezen via macOS Contacts app (iCloud sync)</p>
+                    `;
+                } else {
+                    el.innerHTML = `<span class="text-red-600">❌ Niet beschikbaar</span>`;
+                    section.innerHTML = `<p class="text-red-600">${data.message}</p>`;
+                }
+            } catch (e) {
+                document.getElementById('int-contacts').textContent = '❌ Error: ' + e.message;
+            }
+        }
+        
+        async function loadBirthdays() {
+            try {
+                const res = await fetch('/api/contacts/birthdays?days=30');
+                const data = await res.json();
+                const list = document.getElementById('birthdays-list');
+                
+                if (data.upcoming && data.upcoming.length > 0) {
+                    list.innerHTML = '<h3 class="font-semibold mb-2">📅 Komende 30 dagen:</h3>' + 
+                        data.upcoming.slice(0, 10).map(b => `
+                            <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                <span>🎂 <strong>${b.name}</strong></span>
+                                <span class="text-sm text-gray-500">${b.birthday || ''} ${b.age ? '(' + b.age + ' jaar)' : ''}</span>
+                            </div>
+                        `).join('');
+                } else {
+                    list.innerHTML = '<p class="text-gray-500">Geen verjaardagen in de komende 30 dagen</p>';
+                }
+            } catch (e) {
+                document.getElementById('birthdays-list').innerHTML = '<p class="text-red-600">Error: ' + e.message + '</p>';
+            }
         }
 
         async function loadSystemMetrics() {
