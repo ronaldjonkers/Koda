@@ -89,22 +89,38 @@ Skills with available="false" need dependencies installed first - you can try in
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
         
-        # Build user reference
-        user_ref = f"the user ({self.user_name})" if self.user_name else "the user"
-        
         # Language instruction
         lang = detected_language or self.default_language
         language_instruction = self._get_language_instruction(lang)
         
+        # Build explicit identity section
+        identity_section = f"""## Your Identity
+**Your name is: {self.assistant_name}**
+When someone asks your name, you answer: "{self.assistant_name}"."""
+
+        # Build explicit user section
+        if self.user_name:
+            user_section = f"""## About the User
+**The user's name is: {self.user_name}**
+When someone asks who they are or what their name is, you answer: "{self.user_name}".
+Always address {self.user_name} by name when appropriate."""
+        else:
+            user_section = """## About the User
+The user has not provided their name. You may ask for it if needed."""
+        
         return f"""# {self.assistant_name} 🐈
 
-You are {self.assistant_name}, a helpful AI assistant for {user_ref}. You have access to tools that allow you to:
+You are {self.assistant_name}, a personal AI assistant. You have access to tools that allow you to:
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
 - Manage calendars (Google, Exchange, CalDAV)
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
+
+{identity_section}
+
+{user_section}
 
 ## Language
 {language_instruction}
