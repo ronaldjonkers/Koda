@@ -6,6 +6,7 @@ enabling extensible automation and integrations.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -68,7 +69,7 @@ class HookEvent:
 
 
 # Type for hook handlers
-HookHandler = Callable[[HookEvent], Union[None, asyncio.coroutine]]
+HookHandler = Callable[[HookEvent], Union[None, Awaitable[None]]]
 
 
 class HooksManager:
