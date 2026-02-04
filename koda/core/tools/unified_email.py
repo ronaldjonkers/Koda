@@ -1,5 +1,6 @@
 """Unified email tool that works with email_accounts configuration."""
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from loguru import logger
@@ -19,22 +20,28 @@ class UnifiedEmailTool(Tool):
     
     name = "email"
     description = """Access your configured email accounts to read, search, and summarize emails.
-    
-IMPORTANT: First use 'list_accounts' to see available accounts, then specify account_name for other actions.
 
 Actions:
-- list_accounts: List all configured email accounts (use this first!)
-- inbox: Get recent inbox messages from an account
-- unread: Get unread messages from an account
+- list_accounts: List all configured email accounts
+- inbox: Get recent inbox messages (use max_results to control how many)
+- today: Get emails received today
+- recent: Get emails from the last few hours (use hours parameter)
+- unread: Get unread messages
 - search: Search emails by subject, sender, or content
 - read: Read full email content by ID (for summarizing)
 
+Parameters:
+- account_name: Name of the email account (optional if only one account)
+- max_results: Number of emails to return (default: 10)
+- hours: For 'recent' action - how many hours back to look (default: 4)
+- query: Search query for 'search' action
+
 Examples:
-- List accounts: {"action": "list_accounts"}
-- Get inbox: {"action": "inbox", "account_name": "goSettle Ronald", "max_results": 10}
-- Get unread: {"action": "unread", "account_name": "goSettle Ronald"}
-- Search: {"action": "search", "account_name": "goSettle Ronald", "query": "invoice"}
-- Read email: {"action": "read", "account_name": "goSettle Ronald", "message_id": "abc123"}
+- Get last 5 emails: {"action": "inbox", "max_results": 5}
+- Get today's emails: {"action": "today"}
+- Get emails from last 2 hours: {"action": "recent", "hours": 2}
+- Search for invoices: {"action": "search", "query": "invoice"}
+- Read specific email: {"action": "read", "message_id": "abc123"}
 """
     
     parameters = {
@@ -42,17 +49,22 @@ Examples:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list_accounts", "inbox", "unread", "search", "read"],
+                "enum": ["list_accounts", "inbox", "today", "recent", "unread", "search", "read"],
                 "description": "Action to perform"
             },
             "account_name": {
                 "type": "string",
-                "description": "Name of the email account to use (from list_accounts)"
+                "description": "Name of the email account to use (optional if only one account)"
             },
             "max_results": {
                 "type": "integer",
-                "description": "Maximum number of messages to return",
+                "description": "Maximum number of messages to return (default: 10)",
                 "default": 10
+            },
+            "hours": {
+                "type": "integer",
+                "description": "For 'recent' action: how many hours back to look (default: 4)",
+                "default": 4
             },
             "query": {
                 "type": "string",
@@ -168,6 +180,13 @@ Examples:
             if action == "inbox":
                 return self._get_inbox(client, kwargs.get("max_results", 10))
             
+            elif action == "today":
+                return self._get_today(client, kwargs.get("max_results", 50))
+            
+            elif action == "recent":
+                hours = kwargs.get("hours", 4)
+                return self._get_recent(client, hours, kwargs.get("max_results", 50))
+            
             elif action == "unread":
                 return self._get_unread(client)
             
@@ -232,6 +251,58 @@ Examples:
         else:
             messages = client.get_unread()
             return self._format_messages(messages, "Unread messages")
+    
+    def _get_today(self, client, max_results: int) -> str:
+        """Get emails received today."""
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        if hasattr(client, 'list_emails_since'):
+            messages = client.list_emails_since(since=today, max_results=max_results)
+        elif hasattr(client, 'list_emails'):
+            # Get more emails and filter by date
+            all_messages = client.list_emails(max_results=100)
+            messages = []
+            for m in all_messages:
+                date_str = m.get('date', '')
+                if date_str:
+                    try:
+                        # Parse ISO date
+                        msg_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        if msg_date.replace(tzinfo=None) >= today:
+                            messages.append(m)
+                    except (ValueError, TypeError):
+                        pass
+            messages = messages[:max_results]
+        else:
+            messages = []
+        
+        today_str = today.strftime("%A %d %B")
+        return self._format_messages(messages, f"Emails from today ({today_str})")
+    
+    def _get_recent(self, client, hours: int, max_results: int) -> str:
+        """Get emails from the last N hours."""
+        since = datetime.now() - timedelta(hours=hours)
+        
+        if hasattr(client, 'list_emails_since'):
+            messages = client.list_emails_since(since=since, max_results=max_results)
+        elif hasattr(client, 'list_emails'):
+            # Get more emails and filter by date
+            all_messages = client.list_emails(max_results=100)
+            messages = []
+            for m in all_messages:
+                date_str = m.get('date', '')
+                if date_str:
+                    try:
+                        msg_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        if msg_date.replace(tzinfo=None) >= since:
+                            messages.append(m)
+                    except (ValueError, TypeError):
+                        pass
+            messages = messages[:max_results]
+        else:
+            messages = []
+        
+        return self._format_messages(messages, f"Emails from last {hours} hours")
     
     def _search(self, client, query: str, max_results: int) -> str:
         """Search emails."""

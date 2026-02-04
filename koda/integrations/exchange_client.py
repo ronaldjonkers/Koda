@@ -72,23 +72,19 @@ class ExchangeClient:
         try:
             from exchangelib import (
                 Account, Credentials, Configuration, DELEGATE,
-                EWSDateTime, EWSTimeZone, Version, Build
+                EWSDateTime, EWSTimeZone, Version, Build, BASIC, NTLM
             )
-            from exchangelib.protocol import BaseProtocol
+            from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
         except ImportError:
             raise ImportError(
                 "exchangelib not installed. Run: pip install exchangelib"
             )
         
-        # Set up credentials based on auth type
-        # Use username for authentication (may be different from email, e.g., DOMAIN\\user)
-        if self.auth_type == "ntlm":
-            # NTLM authentication for on-premises Exchange
-            from exchangelib import NTLM
-            credentials = Credentials(self.username, self.password)
-        else:
-            # Basic authentication
-            credentials = Credentials(self.username, self.password)
+        # Disable SSL verification for compatibility with various Exchange servers
+        BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+        
+        # Set up credentials
+        credentials = Credentials(self.username, self.password)
         
         # Determine version
         version_obj = None
@@ -96,37 +92,83 @@ class ExchangeClient:
             major, minor = self.VERSION_MAP[self.version]
             version_obj = Version(Build(major, minor))
         
+        # Try multiple connection methods with fallbacks
+        errors = []
+        
+        # Method 1: If server is specified and autodiscover is disabled, try direct connection
         if self.server and not self.use_autodiscover:
-            # Direct connection to specified server
-            config_kwargs = {
-                "server": self.server,
-                "credentials": credentials,
-            }
-            if version_obj:
-                config_kwargs["version"] = version_obj
-            
-            config = Configuration(**config_kwargs)
-            self._account = Account(
-                self.email,
-                config=config,
-                autodiscover=False,
-                access_type=DELEGATE
-            )
-        else:
-            # Use autodiscover
+            try:
+                logger.debug(f"Trying direct connection to {self.server}...")
+                config_kwargs = {
+                    "server": self.server,
+                    "credentials": credentials,
+                }
+                if version_obj:
+                    config_kwargs["version"] = version_obj
+                
+                config = Configuration(**config_kwargs)
+                self._account = Account(
+                    self.email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE
+                )
+                logger.info(f"Connected to Exchange via direct connection: {self.server}")
+                return self._account
+            except Exception as e:
+                errors.append(f"Direct connection failed: {str(e)[:100]}")
+                logger.debug(f"Direct connection failed: {e}")
+        
+        # Method 2: Try autodiscover (always try this as fallback or primary)
+        try:
+            logger.debug(f"Trying autodiscover for {self.email}...")
             self._account = Account(
                 self.email,
                 credentials=credentials,
                 autodiscover=True,
                 access_type=DELEGATE
             )
+            logger.info(f"Connected to Exchange via autodiscover")
+            return self._account
+        except Exception as e:
+            errors.append(f"Autodiscover failed: {str(e)[:100]}")
+            logger.debug(f"Autodiscover failed: {e}")
         
-        # Log the detected version for debugging
-        if self._account:
-            detected = self._account.version
-            logger.debug(f"Connected to Exchange: {detected}")
+        # Method 3: Try common Office 365 server if autodiscover failed
+        if not self._account:
+            try:
+                logger.debug("Trying Office 365 endpoint as fallback...")
+                config = Configuration(
+                    server="outlook.office365.com",
+                    credentials=credentials,
+                )
+                self._account = Account(
+                    self.email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE
+                )
+                logger.info("Connected to Exchange via Office 365 fallback")
+                return self._account
+            except Exception as e:
+                errors.append(f"Office 365 fallback failed: {str(e)[:100]}")
+                logger.debug(f"Office 365 fallback failed: {e}")
         
-        return self._account
+        # All methods failed
+        error_summary = "; ".join(errors)
+        raise ConnectionError(
+            f"Could not connect to Exchange for {self.email}. "
+            f"Tried: {error_summary}. "
+            f"Check credentials and server settings."
+        )
+    
+    def _ensure_connected(self):
+        """Ensure we have a valid connection, with helpful error messages."""
+        try:
+            return self._get_account()
+        except Exception as e:
+            logger.error(f"Exchange connection error: {e}")
+            raise
     
     def test_connection(self) -> tuple[bool, str]:
         """Test the Exchange connection and return status."""
