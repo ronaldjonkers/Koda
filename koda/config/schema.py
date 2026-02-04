@@ -349,6 +349,22 @@ class IntegrationsConfig(BaseModel):
         """Get all unified accounts (new + legacy merged + old configs converted)."""
         all_accounts: dict[str, Account] = {}
         
+        # 0. Auto-detect Google Workspace (OAuth-based, not in config)
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            if status.get("authorized"):
+                all_accounts["Google Workspace"] = Account(
+                    name="Google Workspace",
+                    type="google",
+                    enabled=True,
+                    email=status.get("email", ""),
+                    capabilities=["email", "calendar"],
+                )
+        except Exception:
+            pass
+        
         # 1. New unified accounts list
         for acc in self.accounts:
             if acc.name and acc.enabled:
