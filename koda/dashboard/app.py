@@ -42,6 +42,15 @@ def remove_active_task(task_id: str):
     _metrics["active_tasks"] = [t for t in _metrics["active_tasks"] if t["id"] != task_id]
 
 
+def _check_linkedin_session() -> bool:
+    """Check if LinkedIn browser session exists."""
+    browser_path = Path.home() / ".koda" / "linkedin_browser"
+    if browser_path.exists():
+        session_files = list(browser_path.glob("**/Cookies*")) + list(browser_path.glob("**/Local Storage*"))
+        return len(session_files) > 0
+    return False
+
+
 def add_recent_message(sender: str, preview: str):
     """Add a recent message to tracking."""
     _metrics["recent_messages"].insert(0, {
@@ -206,7 +215,7 @@ def create_app() -> FastAPI:
                     "bot_mode": config.channels.whatsapp.bot_mode
                 },
                 "integrations": {
-                    "linkedin": config.integrations.linkedin.enabled,
+                    "linkedin": _check_linkedin_session(),
                     "accounts": len(config.integrations.accounts) if config.integrations.accounts else 0
                 },
                 "metrics": {
@@ -223,6 +232,39 @@ def create_app() -> FastAPI:
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/linkedin/status")
+    async def get_linkedin_status():
+        """Get LinkedIn session status."""
+        browser_path = Path.home() / ".koda" / "linkedin_browser"
+        style_path = Path.home() / ".koda" / "linkedin_style.json"
+        
+        session_active = False
+        style_learned = False
+        style_info = None
+        
+        if browser_path.exists():
+            session_files = list(browser_path.glob("**/Cookies*")) + list(browser_path.glob("**/Local Storage*"))
+            session_active = len(session_files) > 0
+        
+        if style_path.exists():
+            try:
+                with open(style_path) as f:
+                    style_data = json.load(f)
+                style_learned = True
+                style_info = {
+                    "language": style_data.get("language", "Unknown"),
+                    "tone": style_data.get("tone", "Unknown")
+                }
+            except:
+                pass
+        
+        return {
+            "session_active": session_active,
+            "style_learned": style_learned,
+            "style_info": style_info,
+            "setup_command": "koda setup-linkedin"
+        }
     
     @app.get("/api/accounts")
     async def get_accounts():
@@ -944,17 +986,25 @@ def get_dashboard_html() -> str:
                 <div class="card">
                     <h2 class="text-lg font-semibold mb-4 flex items-center"><span class="mr-2">💼</span> LinkedIn Settings</h2>
                     <div class="space-y-4">
-                        <div class="flex items-center">
-                            <input id="cfg-li-enabled" type="checkbox" class="w-4 h-4 text-blue-600 rounded">
-                            <label class="ml-2 text-sm text-gray-700">Enable LinkedIn</label>
+                        <div id="linkedin-status-box" class="p-3 bg-gray-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Status: <span id="cfg-li-status" class="font-medium">Checking...</span></p>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn Email</label>
-                            <input id="cfg-li-email" type="email" class="input" placeholder="your@email.com">
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <p class="text-sm text-blue-800 font-medium mb-2">🔗 Browser-based Login</p>
+                            <p class="text-sm text-blue-700 mb-3">LinkedIn uses browser session for stable automation. Run this command in terminal:</p>
+                            <code class="block bg-blue-100 p-2 rounded text-sm font-mono">koda setup-linkedin</code>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn Password</label>
-                            <input id="cfg-li-password" type="password" class="input" placeholder="••••••••">
+                        <div class="text-sm text-gray-500">
+                            <p class="font-medium mb-1">Features:</p>
+                            <ul class="list-disc list-inside space-y-1">
+                                <li>No 2FA issues</li>
+                                <li>Posting with images</li>
+                                <li>Analytics access</li>
+                                <li>Style learning</li>
+                            </ul>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="checkLinkedInStatus()" class="btn btn-secondary text-sm">🔄 Refresh Status</button>
                         </div>
                     </div>
                 </div>
@@ -1169,8 +1219,8 @@ def get_dashboard_html() -> str:
                 document.getElementById('cfg-wa-owner').value = configData.channels?.whatsapp?.owner_phone || '';
                 document.getElementById('cfg-wa-allowfrom').value = (configData.channels?.whatsapp?.allow_from || []).join(', ');
                 
-                document.getElementById('cfg-li-enabled').checked = configData.integrations?.linkedin?.enabled || false;
-                document.getElementById('cfg-li-email').value = configData.integrations?.linkedin?.email || '';
+                // Load LinkedIn status separately
+                checkLinkedInStatus();
                 
                 // Show Brave key status
                 if (configData.tools?.brave_api_key) {
@@ -1184,7 +1234,7 @@ def get_dashboard_html() -> str:
                 
                 // Update integrations tab
                 document.getElementById('int-brave').innerHTML = configData.tools?.brave_api_key ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Not configured</span>';
-                document.getElementById('int-linkedin').innerHTML = configData.integrations?.linkedin?.enabled ? '<span class="badge badge-green">Active</span> ' + configData.integrations.linkedin.email : '<span class="badge badge-red">Disabled</span>';
+                // LinkedIn status is set by checkLinkedInStatus()
                 document.getElementById('int-google').innerHTML = configData.integrations?.google?.enabled ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-yellow">Not configured</span>';
                 document.getElementById('int-exchange').innerHTML = configData.integrations?.exchange?.enabled ? '<span class="badge badge-green">Active</span> ' + configData.integrations.exchange.email : '<span class="badge badge-red">Disabled</span>';
                 document.getElementById('int-caldav').innerHTML = configData.integrations?.caldav?.enabled ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Disabled</span>';
@@ -1250,6 +1300,30 @@ def get_dashboard_html() -> str:
             }
         }
 
+        async function checkLinkedInStatus() {
+            try {
+                const res = await fetch('/api/linkedin/status');
+                const data = await res.json();
+                
+                const statusEl = document.getElementById('cfg-li-status');
+                const intEl = document.getElementById('int-linkedin');
+                
+                if (data.session_active) {
+                    statusEl.innerHTML = '<span class="text-green-600">✓ Sessie actief</span>';
+                    if (data.style_learned && data.style_info) {
+                        statusEl.innerHTML += ` <span class="text-gray-500">(${data.style_info.language}, ${data.style_info.tone})</span>`;
+                    }
+                    intEl.innerHTML = '<span class="badge badge-green">Active</span> Browser sessie';
+                } else {
+                    statusEl.innerHTML = '<span class="text-red-600">✗ Niet ingelogd</span>';
+                    intEl.innerHTML = '<span class="badge badge-red">Not configured</span>';
+                }
+            } catch (e) {
+                console.error('Failed to check LinkedIn status:', e);
+                document.getElementById('cfg-li-status').textContent = 'Error checking status';
+            }
+        }
+
         async function saveConfig() {
             try {
                 const allowFrom = document.getElementById('cfg-wa-allowfrom').value
@@ -1273,11 +1347,7 @@ def get_dashboard_html() -> str:
                         }
                     },
                     integrations: {
-                        linkedin: {
-                            enabled: document.getElementById('cfg-li-enabled').checked,
-                            email: document.getElementById('cfg-li-email').value,
-                            password: document.getElementById('cfg-li-password').value || undefined
-                        }
+                        // LinkedIn is configured via CLI, not dashboard
                     },
                     tools: {}
                 };

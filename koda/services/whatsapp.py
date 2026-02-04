@@ -401,6 +401,9 @@ Example: `/addbrave BSA1234567890abcdef`"""
         elif command == "/resetlinkedin":
             return self._reset_linkedin()
         
+        elif command == "/linkedinstatus":
+            return self._linkedin_status()
+        
         elif command == "/googlehelp":
             return self._google_setup_help()
         
@@ -572,51 +575,145 @@ Example: `/addbrave BSA1234567890abcdef`"""
             return f"❌ Error deleting schedule: {e}"
     
     def _start_linkedin_setup(self, phone: str) -> str:
-        """Start step-by-step LinkedIn setup."""
-        self._setup_sessions[phone] = {
-            "type": "linkedin",
-            "step": 1,
-            "data": {}
-        }
-        return """🔗 *LinkedIn Account Setup*
+        """Start LinkedIn setup with Playwright browser login."""
+        return """🔗 *LinkedIn Setup (Browser Login)*
 
-Step 1/2: Enter your LinkedIn email address:
+De nieuwe LinkedIn integratie gebruikt een browser sessie voor meer stabiliteit.
 
-(or /cancel to stop)"""
+*Eenmalig setup:*
+1. Open een terminal op je computer
+2. Run dit commando:
+```
+koda setup-linkedin
+```
+3. Log in via de browser die opent
+4. Druk Enter in de terminal als je klaar bent
+
+*Voordelen:*
+✅ Stabieler dan email/wachtwoord
+✅ Geen problemen met 2FA
+✅ Sessie blijft bewaard
+✅ Posting en analytics ondersteuning
+
+*Huidige status:*
+Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
     
     def _remove_linkedin(self, config) -> str:
-        """Remove LinkedIn configuration."""
-        if not config.integrations.linkedin.enabled:
-            return "ℹ️ LinkedIn is not configured."
+        """Remove LinkedIn configuration and browser profile."""
+        from pathlib import Path
+        import shutil
         
-        config.integrations.linkedin.enabled = False
-        config.integrations.linkedin.email = ""
-        config.integrations.linkedin.password = ""
-        save_config(config)
-        return "✅ LinkedIn account removed."
+        removed = []
+        
+        # Remove config settings
+        if config.integrations.linkedin.enabled:
+            config.integrations.linkedin.enabled = False
+            config.integrations.linkedin.email = ""
+            config.integrations.linkedin.password = ""
+            save_config(config)
+            removed.append("Config settings")
+        
+        # Remove browser profile
+        browser_path = Path.home() / ".koda" / "linkedin_browser"
+        if browser_path.exists():
+            try:
+                shutil.rmtree(browser_path)
+                removed.append("Browser sessie")
+            except Exception as e:
+                logger.error(f"Failed to remove browser profile: {e}")
+        
+        # Remove old cookies
+        cookies_path = Path.home() / ".koda" / "linkedin_cookies.json"
+        if cookies_path.exists():
+            cookies_path.unlink()
+            removed.append("Cookies")
+        
+        # Remove style profile
+        style_path = Path.home() / ".koda" / "linkedin_style.json"
+        if style_path.exists():
+            style_path.unlink()
+            removed.append("Stijl profiel")
+        
+        if removed:
+            return f"✅ LinkedIn verwijderd:\n• " + "\n• ".join(removed) + "\n\nGebruik `/addlinkedin` om opnieuw te configureren."
+        return "ℹ️ LinkedIn was niet geconfigureerd."
     
     def _reset_linkedin(self) -> str:
-        """Reset LinkedIn by clearing cookies to force re-authentication."""
+        """Reset LinkedIn by clearing browser profile for fresh login."""
         from pathlib import Path
+        import shutil
         
+        browser_path = Path.home() / ".koda" / "linkedin_browser"
         cookies_path = Path.home() / ".koda" / "linkedin_cookies.json"
         
         try:
+            cleared = []
+            
+            if browser_path.exists():
+                shutil.rmtree(browser_path)
+                cleared.append("Browser sessie")
+            
             if cookies_path.exists():
                 cookies_path.unlink()
-                return """✅ *LinkedIn Reset*
+                cleared.append("Cookies")
+            
+            if cleared:
+                return f"""✅ *LinkedIn Reset*
 
-Cookies cleared. LinkedIn will re-authenticate on next use.
+Verwijderd: {', '.join(cleared)}
 
-If you're still having issues:
-1. Check your LinkedIn email for security alerts
-2. LinkedIn may require a CAPTCHA - try logging in via browser first
-3. Use `/removelinkedin` then `/addlinkedin` to reconfigure"""
+*Opnieuw inloggen:*
+```
+koda setup-linkedin
+```
+
+Dit opent een browser voor handmatige login."""
             else:
-                return "ℹ️ No LinkedIn cookies found. LinkedIn will authenticate fresh on next use."
+                return "ℹ️ Geen LinkedIn sessie gevonden. Run `koda setup-linkedin` om in te loggen."
         except Exception as e:
             logger.error(f"Error resetting LinkedIn: {e}")
             return f"❌ Error resetting LinkedIn: {e}"
+    
+    def _linkedin_status(self) -> str:
+        """Check LinkedIn session status."""
+        from pathlib import Path
+        
+        browser_path = Path.home() / ".koda" / "linkedin_browser"
+        style_path = Path.home() / ".koda" / "linkedin_style.json"
+        
+        status_lines = ["🔗 *LinkedIn Status*\n"]
+        
+        # Check browser session
+        if browser_path.exists():
+            # Check if there are actual session files
+            session_files = list(browser_path.glob("**/Cookies*")) + list(browser_path.glob("**/Local Storage*"))
+            if session_files:
+                status_lines.append("✅ Browser sessie: Aanwezig")
+            else:
+                status_lines.append("⚠️ Browser sessie: Leeg (login nodig)")
+        else:
+            status_lines.append("❌ Browser sessie: Niet gevonden")
+        
+        # Check style profile
+        if style_path.exists():
+            try:
+                import json
+                with open(style_path) as f:
+                    style = json.load(f)
+                lang = style.get("language", "?")
+                tone = style.get("tone", "?")
+                status_lines.append(f"✅ Stijl profiel: {lang}, {tone}")
+            except:
+                status_lines.append("⚠️ Stijl profiel: Corrupt")
+        else:
+            status_lines.append("ℹ️ Stijl profiel: Niet geleerd")
+        
+        status_lines.append("\n*Commando's:*")
+        status_lines.append("• `koda setup-linkedin` - Inloggen")
+        status_lines.append("• `/resetlinkedin` - Sessie wissen")
+        status_lines.append("• `/removelinkedin` - Alles verwijderen")
+        
+        return "\n".join(status_lines)
     
     def _google_setup_help(self) -> str:
         """Return Google Calendar setup instructions."""

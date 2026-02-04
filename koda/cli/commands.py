@@ -586,6 +586,120 @@ def setup_google(
         raise typer.Exit(1)
 
 
+@app.command("setup-linkedin")
+def setup_linkedin(
+    reset: bool = typer.Option(False, "--reset", "-r", help="Reset existing session before login"),
+    status: bool = typer.Option(False, "--status", "-s", help="Check session status only"),
+):
+    """Setup LinkedIn integration via browser login.
+    
+    Opens a browser for manual LinkedIn login. The session is saved
+    and reused for all future automation (posting, analytics, etc).
+    """
+    from pathlib import Path
+    import shutil
+    
+    browser_path = Path.home() / ".koda" / "linkedin_browser"
+    style_path = Path.home() / ".koda" / "linkedin_style.json"
+    
+    # Status check
+    if status:
+        console.print("\n[bold cyan]🔗 LinkedIn Status[/bold cyan]\n")
+        
+        if browser_path.exists():
+            session_files = list(browser_path.glob("**/Cookies*")) + list(browser_path.glob("**/Local Storage*"))
+            if session_files:
+                console.print("[green]✓[/green] Browser sessie: Aanwezig")
+            else:
+                console.print("[yellow]⚠️[/yellow] Browser sessie: Leeg (login nodig)")
+        else:
+            console.print("[red]✗[/red] Browser sessie: Niet gevonden")
+        
+        if style_path.exists():
+            try:
+                import json
+                with open(style_path) as f:
+                    style_data = json.load(f)
+                console.print(f"[green]✓[/green] Stijl profiel: {style_data.get('language', '?')}, {style_data.get('tone', '?')}")
+            except:
+                console.print("[yellow]⚠️[/yellow] Stijl profiel: Corrupt")
+        else:
+            console.print("[dim]ℹ️[/dim] Stijl profiel: Niet geleerd (vraag de bot om je stijl te leren)")
+        
+        return
+    
+    # Reset if requested
+    if reset and browser_path.exists():
+        console.print("[yellow]Resetting LinkedIn session...[/yellow]")
+        try:
+            shutil.rmtree(browser_path)
+            console.print("[green]✓[/green] Browser sessie verwijderd")
+        except Exception as e:
+            console.print(f"[red]Error removing session: {e}[/red]")
+    
+    console.print("\n[bold cyan]🔗 LinkedIn Setup (Browser Login)[/bold cyan]\n")
+    console.print("Dit opent een browser venster waar je kunt inloggen op LinkedIn.")
+    console.print("Na het inloggen wordt je sessie opgeslagen voor toekomstig gebruik.\n")
+    
+    console.print("[bold]Voordelen van deze methode:[/bold]")
+    console.print("  • Geen problemen met 2FA")
+    console.print("  • Stabielere connectie")
+    console.print("  • Ondersteuning voor posting en analytics")
+    console.print("  • Sessie blijft bewaard\n")
+    
+    if not typer.confirm("Browser openen voor LinkedIn login?"):
+        raise typer.Exit()
+    
+    try:
+        import asyncio
+        from koda.integrations.linkedin_playwright import LinkedInPlaywright
+        
+        console.print("\n[dim]Browser wordt gestart...[/dim]")
+        
+        async def do_login():
+            client = LinkedInPlaywright(headless=False)
+            
+            console.print("\n[yellow]Log in bij LinkedIn in het browser venster.[/yellow]")
+            console.print("[dim]Druk Enter hier als je klaar bent met inloggen...[/dim]\n")
+            
+            await client._ensure_browser()
+            await client._page.goto("https://www.linkedin.com/login")
+            
+            input()  # Wait for user
+            
+            # Verify login
+            valid, message = await client.check_session()
+            await client.close()
+            
+            return valid, message
+        
+        valid, message = asyncio.run(do_login())
+        
+        if valid:
+            console.print("\n[green]✓ LinkedIn succesvol verbonden![/green]")
+            console.print(f"  {message}\n")
+            
+            console.print("[bold]Je kunt nu:[/bold]")
+            console.print("  • LinkedIn berichten lezen en versturen")
+            console.print("  • Posts maken (met afbeeldingen)")
+            console.print("  • Feed en analytics bekijken")
+            console.print("  • Schrijfstijl laten analyseren")
+            console.print("\n[dim]Tip: Vraag de bot 'leer mijn LinkedIn stijl' voor gepersonaliseerde suggesties.[/dim]")
+        else:
+            console.print(f"\n[red]✗ Login verificatie mislukt: {message}[/red]")
+            console.print("Probeer opnieuw met: [cyan]koda setup-linkedin --reset[/cyan]")
+            
+    except ImportError:
+        console.print("[red]Error: Playwright niet geïnstalleerd[/red]")
+        console.print("\nInstalleer met:")
+        console.print("  [cyan]pip install playwright[/cyan]")
+        console.print("  [cyan]playwright install chromium[/cyan]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 # ============================================================================
 # Dashboard
 # ============================================================================
