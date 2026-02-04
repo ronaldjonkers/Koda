@@ -546,6 +546,9 @@ class SetupWizard:
         """Configure Exchange calendar."""
         console.print("\n[bold]Exchange Calendar Setup[/bold]")
         console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
+        console.print("[bold]Supported versions:[/bold]")
+        console.print("  • Exchange 2013, 2016, 2019")
+        console.print("  • Office 365 / Exchange Online\n")
         console.print("[bold]Server formats:[/bold]")
         console.print("  [cyan]Office 365:[/cyan]     outlook.office365.com")
         console.print("  [cyan]On-premises:[/cyan]   exchange.yourcompany.com")
@@ -557,15 +560,25 @@ class SetupWizard:
         password = Prompt.ask("Password", password=True, default=account.password or "")
         server = Prompt.ask("Server (leave empty for autodiscover)", default=account.server or "")
         
+        # Ask for Exchange version
+        console.print("\n[bold]Exchange Version:[/bold]")
+        console.print("  [cyan]auto[/cyan]  - Auto-detect (default)")
+        console.print("  [cyan]2013[/cyan]  - Exchange 2013")
+        console.print("  [cyan]2016[/cyan]  - Exchange 2016") 
+        console.print("  [cyan]2019[/cyan]  - Exchange 2019")
+        console.print("  [cyan]o365[/cyan]  - Office 365")
+        version = Prompt.ask("Version", default=account.version if hasattr(account, 'version') else "auto",
+                           choices=["auto", "2013", "2016", "2019", "o365"])
+        
         account.type = "exchange"
         account.email = email
         account.username = username or email
         account.password = password
         account.server = server
-        account.version = "auto"
+        account.version = version
         
         console.print("Testing connection...", end=" ")
-        success, message = self._test_exchange(email, username or email, password, server, "auto")
+        success, message = self._test_exchange(email, username or email, password, server, version)
         
         if success:
             console.print(f"[green]✓[/green] {message}")

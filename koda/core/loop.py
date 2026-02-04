@@ -136,7 +136,7 @@ class AgentLoop:
         self.tools.register(ExchangeEmailTool())
         
         # Unified email tool for email_accounts configuration
-        self.tools.register(UnifiedEmailTool(config=calendar_config.get('config')))
+        self.tools.register(UnifiedEmailTool(config=self.calendar_config.get('config') if self.calendar_config else None))
         
         # Contacts tool
         self.tools.register(ContactsTool())
