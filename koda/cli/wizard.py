@@ -199,7 +199,7 @@ class SetupWizard:
             self.config.providers.groq.api_key = api_key
         
         # Set the default model
-        self.config.agent.model = model
+        self.config.agents.defaults.model = model
         
         # Test the connection with a real prompt
         console.print("\nTesting LLM connection...", end=" ")
