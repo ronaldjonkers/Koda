@@ -546,12 +546,16 @@ class SetupWizard:
         """Configure Exchange calendar."""
         console.print("\n[bold]Exchange Calendar Setup[/bold]")
         console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
+        console.print("[bold]Server formats:[/bold]")
+        console.print("  [cyan]Office 365:[/cyan]     outlook.office365.com")
+        console.print("  [cyan]On-premises:[/cyan]   exchange.yourcompany.com")
+        console.print("  [cyan]Autodiscover:[/cyan]  Leave empty to auto-detect\n")
         
         # Use existing values as defaults
         email = Prompt.ask("Email address", default=account.email or "")
         username = Prompt.ask("Username (leave empty if same as email)", default=account.username or "")
         password = Prompt.ask("Password", password=True, default=account.password or "")
-        server = Prompt.ask("Server (e.g., outlook.office365.com)", default=account.server or "outlook.office365.com")
+        server = Prompt.ask("Server (leave empty for autodiscover)", default=account.server or "")
         
         account.type = "exchange"
         account.email = email
@@ -565,10 +569,35 @@ class SetupWizard:
         
         if success:
             console.print(f"[green]✓[/green] {message}")
+            
+            # Offer to also configure email with same credentials
+            if Confirm.ask("\nAlso configure Exchange email with same credentials?", default=True):
+                self._add_exchange_email_from_calendar(account)
+            
             return True
         else:
             console.print(f"[red]✗[/red] {message}")
+            console.print("\n[dim]Troubleshooting tips:[/dim]")
+            console.print("  • For Office 365: use 'outlook.office365.com'")
+            console.print("  • For on-premises: try leaving server empty for autodiscover")
+            console.print("  • Check if your account requires an app password")
             return False
+    
+    def _add_exchange_email_from_calendar(self, cal_account: "CalendarAccount") -> None:
+        """Add Exchange email using same credentials as calendar."""
+        from koda.config.schema import EmailAccount
+        
+        email_account = EmailAccount(
+            name=f"{cal_account.name} Email",
+            type="exchange",
+            enabled=True,
+            email=cal_account.email,
+            username=cal_account.username,
+            password=cal_account.password,
+            server=cal_account.server
+        )
+        self.config.integrations.email_accounts.append(email_account)
+        console.print(f"[green]✓[/green] Email account '{email_account.name}' added!")
     
     def _configure_caldav_calendar(self, account: "CalendarAccount") -> bool:
         """Configure generic CalDAV calendar."""
@@ -1070,12 +1099,16 @@ class SetupWizard:
         """Configure Exchange email."""
         console.print("\n[bold]Exchange Email Setup[/bold]")
         console.print("[dim]Connect to Microsoft Exchange or Office 365.[/dim]\n")
+        console.print("[bold]Server formats:[/bold]")
+        console.print("  [cyan]Office 365:[/cyan]     outlook.office365.com")
+        console.print("  [cyan]On-premises:[/cyan]   exchange.yourcompany.com")
+        console.print("  [cyan]Autodiscover:[/cyan]  Leave empty to auto-detect\n")
         
         # Use existing values as defaults
         email = Prompt.ask("Email address", default=account.email or "")
         username = Prompt.ask("Username (leave empty if same as email)", default=account.username or "")
         password = Prompt.ask("Password", password=True, default=account.password or "")
-        server = Prompt.ask("Server (e.g., outlook.office365.com)", default=account.server or "outlook.office365.com")
+        server = Prompt.ask("Server (leave empty for autodiscover)", default=account.server or "")
         
         account.type = "exchange"
         account.email = email
@@ -1088,10 +1121,35 @@ class SetupWizard:
         
         if success:
             console.print(f"[green]✓[/green] {message}")
+            
+            # Offer to also configure calendar with same credentials
+            if Confirm.ask("\nAlso configure Exchange calendar with same credentials?", default=True):
+                self._add_exchange_calendar_from_email(account)
+            
             return True
         else:
             console.print(f"[red]✗[/red] {message}")
+            console.print("\n[dim]Troubleshooting tips:[/dim]")
+            console.print("  • For Office 365: use 'outlook.office365.com'")
+            console.print("  • For on-premises: try leaving server empty for autodiscover")
+            console.print("  • Check if your account requires an app password")
             return False
+    
+    def _add_exchange_calendar_from_email(self, email_account: "EmailAccount") -> None:
+        """Add Exchange calendar using same credentials as email."""
+        from koda.config.schema import CalendarAccount
+        
+        cal_account = CalendarAccount(
+            name=f"{email_account.name.replace(' Email', '')} Calendar",
+            type="exchange",
+            enabled=True,
+            email=email_account.email,
+            username=email_account.username,
+            password=email_account.password,
+            server=email_account.server
+        )
+        self.config.integrations.calendar_accounts.append(cal_account)
+        console.print(f"[green]✓[/green] Calendar account '{cal_account.name}' added!")
     
     def _configure_imap_email(self, account: "EmailAccount") -> bool:
         """Configure generic IMAP email."""
