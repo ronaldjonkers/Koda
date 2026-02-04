@@ -104,43 +104,29 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // DEBUG: Log ALL events to diagnose self-message issue
-    const eventsToMonitor = [
-      'messages.upsert',
-      'messages.update', 
-      'messages.delete',
-      'message-receipt.update',
-      'messages.reaction',
-      'presence.update',
-      'chats.update',
-      'chats.upsert',
-      'contacts.update',
-      'contacts.upsert',
-    ];
-    
-    for (const eventName of eventsToMonitor) {
-      if (eventName !== 'messages.upsert') { // we handle this separately
-        this.sock.ev.on(eventName, (data: any) => {
-          console.log(`\n🔔 EVENT: ${eventName}`);
-          console.log(`Data: ${JSON.stringify(data, null, 2).substring(0, 500)}`);
-        });
+    // DEBUG: Use ev.process to capture ALL events without exception
+    // This is the most comprehensive way to see everything Baileys receives
+    this.sock.ev.process(async (events: any) => {
+      console.log(`\n🔔🔔🔔 RAW EVENTS BATCH 🔔🔔🔔`);
+      console.log(`Event keys: ${Object.keys(events).join(', ')}`);
+      
+      for (const [eventName, eventData] of Object.entries(events)) {
+        console.log(`\n--- Event: ${eventName} ---`);
+        console.log(JSON.stringify(eventData, null, 2).substring(0, 800));
       }
-    }
+      console.log(`🔔🔔🔔 END RAW EVENTS 🔔🔔🔔\n`);
+    });
 
-    // Handle incoming messages - following OpenClaw's pattern exactly
+    // Handle incoming messages - process ALL types for debugging
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
       console.log(`\n📨 ===== NEW MESSAGE EVENT =====`);
       console.log(`Type: ${type}, Count: ${messages.length}`);
+      console.log(`Raw upsert:`, JSON.stringify(upsert, null, 2).substring(0, 1000));
       
-      // OpenClaw pattern: Only process "notify" (real-time) and "append" (history sync) events
-      // Skip other types like "prepend" which are not real messages
-      if (type !== 'notify' && type !== 'append') {
-        console.log(`Skipping: type "${type}" is not notify/append`);
-        console.log(`===== END MESSAGE EVENT =====\n`);
-        return;
-      }
+      // Process ALL types for now (including append for history sync)
+      // This helps capture self-messages which may come through differently
       
       // Get my own phone number for self-message detection
       // JID format can be: "31614254251:123@s.whatsapp.net" (with device) or "31614254251@s.whatsapp.net"
