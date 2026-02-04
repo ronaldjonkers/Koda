@@ -372,15 +372,22 @@ class EmailWatcherService:
                 account_name=account.get("name", "Gmail")
             )
         
-        # Exchange/Office 365 via IMAP
+        # Exchange/Office 365 via IMAP - use configured server or skip
+        # Note: Exchange typically uses EWS, not IMAP. IMAP may not be enabled.
+        # Only try if explicitly configured with IMAP host
         if acc_type == "exchange":
-            return self.add_account(
-                host="outlook.office365.com",
-                email=account.get("email", ""),
-                password=account.get("password", ""),
-                port=993,
-                account_name=account.get("name", "Exchange")
-            )
+            imap_host = account.get("imap_host", "")
+            if imap_host:
+                return self.add_account(
+                    host=imap_host,
+                    email=account.get("email", ""),
+                    password=account.get("password", ""),
+                    port=account.get("imap_port", 993),
+                    account_name=account.get("name", "Exchange")
+                )
+            # Skip Exchange accounts without explicit IMAP config
+            # They use EWS protocol, not IMAP
+            return False
         
         return False
     

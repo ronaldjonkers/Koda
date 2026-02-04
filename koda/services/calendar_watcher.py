@@ -385,20 +385,28 @@ def create_calendar_watcher_from_config(config, notification_callback) -> Option
         calendars_added = 0
         
         for acc in accounts:
-            acc_type = getattr(acc, 'type', acc.get('type', '')) if hasattr(acc, 'type') or isinstance(acc, dict) else ''
-            capabilities = getattr(acc, 'capabilities', acc.get('capabilities', [])) if hasattr(acc, 'capabilities') or isinstance(acc, dict) else []
+            # Handle both Pydantic models and dicts
+            if hasattr(acc, 'model_dump'):
+                acc_dict = acc.model_dump()
+            elif isinstance(acc, dict):
+                acc_dict = acc
+            else:
+                acc_dict = {}
+            
+            acc_type = acc_dict.get('type', '')
+            capabilities = acc_dict.get('capabilities', [])
             
             if 'calendar' in capabilities or acc_type in ['google_caldav', 'caldav']:
-                email = getattr(acc, 'email', acc.get('email', '')) if hasattr(acc, 'email') or isinstance(acc, dict) else ''
-                password = getattr(acc, 'password', acc.get('password', '')) if hasattr(acc, 'password') or isinstance(acc, dict) else ''
-                name = getattr(acc, 'name', acc.get('name', '')) if hasattr(acc, 'name') or isinstance(acc, dict) else ''
+                email = acc_dict.get('email', '')
+                password = acc_dict.get('password', '')
+                name = acc_dict.get('name', '')
                 
                 if acc_type == 'google_caldav' and email and password:
                     if service.add_google_caldav(email, password):
                         calendars_added += 1
                 elif acc_type == 'caldav':
-                    url = getattr(acc, 'url', acc.get('url', '')) if hasattr(acc, 'url') or isinstance(acc, dict) else ''
-                    username = getattr(acc, 'username', acc.get('username', email)) if hasattr(acc, 'username') or isinstance(acc, dict) else email
+                    url = acc_dict.get('url', '')
+                    username = acc_dict.get('username', email)
                     if url and username and password:
                         if service.add_caldav(url, username, password, name):
                             calendars_added += 1
