@@ -378,3 +378,217 @@ Examples:
         '''
         run_applescript(script)
         return json.dumps({"status": "deleted", "title": title})
+
+
+class AppleMessagesTool(Tool):
+    """Send and read iMessages/SMS on macOS."""
+    
+    name = "apple_messages"
+    description = """Send and read iMessages/SMS via Messages.app (macOS only).
+
+Actions:
+- send: Send a message to a phone number or email
+- recent: Get recent messages from a contact
+- chats: List recent chat conversations
+
+Examples:
+- Send: {"action": "send", "to": "+31612345678", "message": "Hello!"}
+- Recent: {"action": "recent", "contact": "+31612345678", "limit": 10}
+- Chats: {"action": "chats", "limit": 20}
+
+Note: Sending messages requires Messages.app to be set up with iMessage/SMS.
+"""
+    
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["send", "recent", "chats"],
+                "description": "Action to perform"
+            },
+            "to": {
+                "type": "string",
+                "description": "Phone number or email to send to"
+            },
+            "message": {
+                "type": "string",
+                "description": "Message text to send"
+            },
+            "contact": {
+                "type": "string",
+                "description": "Phone/email to get messages from"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum messages/chats to return",
+                "default": 20
+            }
+        },
+        "required": ["action"]
+    }
+    
+    async def execute(self, action: str, **kwargs: Any) -> str:
+        from loguru import logger
+        import platform
+        
+        if platform.system() != "Darwin":
+            return json.dumps({"error": "Apple Messages only available on macOS"})
+        
+        logger.info(f"💬 apple_messages: {action}")
+        
+        try:
+            if action == "send":
+                return self._send_message(kwargs.get("to", ""), kwargs.get("message", ""))
+            elif action == "recent":
+                return self._get_recent(kwargs.get("contact", ""), kwargs.get("limit", 20))
+            elif action == "chats":
+                return self._get_chats(kwargs.get("limit", 20))
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
+        except Exception as e:
+            logger.error(f"Apple Messages error: {e}")
+            return json.dumps({"error": str(e)})
+    
+    def _send_message(self, to: str, message: str) -> str:
+        """Send an iMessage/SMS."""
+        if not to or not message:
+            return json.dumps({"error": "Both 'to' and 'message' are required"})
+        
+        # Escape special characters
+        message_escaped = message.replace('"', '\\"').replace('\n', '\\n')
+        
+        script = f'''
+        tell application "Messages"
+            set targetService to 1st account whose service type = iMessage
+            set targetBuddy to participant "{to}" of targetService
+            send "{message_escaped}" to targetBuddy
+        end tell
+        '''
+        
+        try:
+            run_applescript(script)
+            return json.dumps({"status": "sent", "to": to})
+        except RuntimeError as e:
+            # Fallback for SMS
+            if "iMessage" in str(e):
+                script_sms = f'''
+                tell application "Messages"
+                    set targetService to 1st account whose service type = SMS
+                    set targetBuddy to participant "{to}" of targetService
+                    send "{message_escaped}" to targetBuddy
+                end tell
+                '''
+                try:
+                    run_applescript(script_sms)
+                    return json.dumps({"status": "sent_sms", "to": to})
+                except:
+                    pass
+            raise
+    
+    def _get_recent(self, contact: str, limit: int) -> str:
+        """Get recent messages from a contact using Messages database."""
+        if not contact:
+            return json.dumps({"error": "Contact phone/email required"})
+        
+        import sqlite3
+        from pathlib import Path
+        
+        db_path = Path.home() / "Library/Messages/chat.db"
+        if not db_path.exists():
+            return json.dumps({"error": "Messages database not found"})
+        
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            
+            # Find chat ID for contact
+            cursor.execute("""
+                SELECT chat.ROWID, chat.chat_identifier
+                FROM chat
+                WHERE chat.chat_identifier LIKE ?
+                LIMIT 1
+            """, (f"%{contact}%",))
+            
+            chat_row = cursor.fetchone()
+            if not chat_row:
+                return json.dumps({"error": f"No chat found for {contact}", "messages": []})
+            
+            chat_id = chat_row[0]
+            
+            # Get messages
+            cursor.execute("""
+                SELECT 
+                    message.text,
+                    message.is_from_me,
+                    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp
+                FROM message
+                JOIN chat_message_join ON message.ROWID = chat_message_join.message_id
+                WHERE chat_message_join.chat_id = ?
+                AND message.text IS NOT NULL
+                ORDER BY message.date DESC
+                LIMIT ?
+            """, (chat_id, limit))
+            
+            messages = []
+            for row in cursor.fetchall():
+                messages.append({
+                    "text": row[0],
+                    "from_me": bool(row[1]),
+                    "timestamp": row[2]
+                })
+            
+            conn.close()
+            
+            return json.dumps({
+                "contact": contact,
+                "messages": messages[::-1],  # Chronological order
+                "count": len(messages)
+            }, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"error": f"Database error: {e}"})
+    
+    def _get_chats(self, limit: int) -> str:
+        """Get list of recent chat conversations."""
+        import sqlite3
+        from pathlib import Path
+        
+        db_path = Path.home() / "Library/Messages/chat.db"
+        if not db_path.exists():
+            return json.dumps({"error": "Messages database not found"})
+        
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT DISTINCT
+                    chat.chat_identifier,
+                    chat.display_name,
+                    (SELECT message.text FROM message 
+                     JOIN chat_message_join ON message.ROWID = chat_message_join.message_id 
+                     WHERE chat_message_join.chat_id = chat.ROWID 
+                     ORDER BY message.date DESC LIMIT 1) as last_message
+                FROM chat
+                ORDER BY chat.ROWID DESC
+                LIMIT ?
+            """, (limit,))
+            
+            chats = []
+            for row in cursor.fetchall():
+                chats.append({
+                    "identifier": row[0],
+                    "display_name": row[1] or row[0],
+                    "last_message": (row[2] or "")[:100]
+                })
+            
+            conn.close()
+            
+            return json.dumps({
+                "chats": chats,
+                "count": len(chats)
+            }, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"error": f"Database error: {e}"})

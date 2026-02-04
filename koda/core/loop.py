@@ -29,7 +29,7 @@ from koda.core.tools.plugin import PluginTool, PluginWrapperTool
 from koda.core.tools.linkedin import LinkedInTool
 from koda.core.tools.weather import WeatherTool
 from koda.core.tools.browser import BrowserTool
-from koda.core.tools.apple import AppleNotesTool, AppleRemindersTool
+from koda.core.tools.apple import AppleNotesTool, AppleRemindersTool, AppleMessagesTool
 from koda.core.tools.smarthome import PhilipsHueTool
 from koda.core.tools.onepassword import OnePasswordTool
 from koda.plugins.loader import PluginLoader
@@ -218,6 +218,7 @@ class AgentLoop:
         # Apple integrations (macOS only)
         self.tools.register(AppleNotesTool())
         self.tools.register(AppleRemindersTool())
+        self.tools.register(AppleMessagesTool())
         
         # Smart Home - Philips Hue
         hue_cfg = self.calendar_config.get("hue", {})
