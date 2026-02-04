@@ -1023,14 +1023,16 @@ Send a number:"""
             return "❌ Choose a number (1-7):"
     
     async def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
-        """Save Exchange account for both email and calendar."""
+        """Save Exchange account as unified account with email+calendar+contacts capabilities."""
         config = load_config()
         
         try:
+            # Create unified account with all Exchange capabilities
             account_data = {
                 "name": data.get("name", "Exchange"),
                 "type": "exchange",
                 "enabled": True,
+                "capabilities": ["email", "calendar", "contacts"],
                 "email": data.get("email"),
                 "username": data.get("username"),
                 "password": data.get("password"),
@@ -1038,15 +1040,22 @@ Send a number:"""
                 "use_autodiscover": data.get("use_autodiscover", False)
             }
             
-            # Add to email accounts
-            if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
-                config.integrations.email_accounts = []
-            config.integrations.email_accounts.append(account_data.copy())
+            # Add to unified accounts list
+            if not hasattr(config.integrations, 'accounts') or config.integrations.accounts is None:
+                config.integrations.accounts = []
             
-            # Add to calendar accounts
-            if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
-                config.integrations.calendar_accounts = []
-            config.integrations.calendar_accounts.append(account_data.copy())
+            # Check if account with same name exists, update it
+            existing_idx = None
+            for i, acc in enumerate(config.integrations.accounts):
+                acc_name = acc.get("name") if isinstance(acc, dict) else getattr(acc, "name", "")
+                if acc_name == account_data["name"]:
+                    existing_idx = i
+                    break
+            
+            if existing_idx is not None:
+                config.integrations.accounts[existing_idx] = account_data
+            else:
+                config.integrations.accounts.append(account_data)
             
             save_config(config)
             
@@ -1058,6 +1067,7 @@ Send a number:"""
 Account *{data['name']}* is configured for:
 • 📧 Email
 • 📅 Calendar
+• 👥 Contacts
 
 The account is now active."""
         
@@ -1066,17 +1076,33 @@ The account is now active."""
             return f"❌ Error saving: {e}"
     
     async def _save_account_from_data(self, account_type: str, data: dict) -> str:
-        """Save account from setup data."""
+        """Save account to unified accounts list with appropriate capabilities."""
         config = load_config()
         
         try:
             name = data.get("name", "Account")
             acc_type = data.get("type", "unknown")
             
+            # Determine capabilities based on account type
+            if acc_type == "exchange":
+                capabilities = ["email", "calendar", "contacts"]
+            elif acc_type == "google":
+                capabilities = ["email", "calendar"]
+            elif acc_type == "imap":
+                capabilities = ["email"]
+            elif acc_type == "caldav":
+                capabilities = ["calendar"]
+            elif acc_type == "icloud":
+                capabilities = ["contacts"]
+            else:
+                # Default: use the requested type
+                capabilities = [account_type] if account_type in ["email", "calendar", "contacts"] else []
+            
             account_data = {
                 "name": name,
                 "type": acc_type,
                 "enabled": True,
+                "capabilities": capabilities,
             }
             
             # Copy relevant fields
@@ -1084,21 +1110,30 @@ The account is now active."""
                 if key in data:
                     account_data[key] = data[key]
             
-            if account_type == "email":
-                if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
-                    config.integrations.email_accounts = []
-                config.integrations.email_accounts.append(account_data)
+            # Add to unified accounts list
+            if not hasattr(config.integrations, 'accounts') or config.integrations.accounts is None:
+                config.integrations.accounts = []
+            
+            # Check if account with same name exists, update it
+            existing_idx = None
+            for i, acc in enumerate(config.integrations.accounts):
+                acc_name = acc.get("name") if isinstance(acc, dict) else getattr(acc, "name", "")
+                if acc_name == name:
+                    existing_idx = i
+                    break
+            
+            if existing_idx is not None:
+                config.integrations.accounts[existing_idx] = account_data
             else:
-                if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
-                    config.integrations.calendar_accounts = []
-                config.integrations.calendar_accounts.append(account_data)
+                config.integrations.accounts.append(account_data)
             
             save_config(config)
             
             # Auto-reload config
             await self._auto_reload_config()
             
-            return f"✅ {account_type.title()} account *{name}* ({acc_type}) added and active!"
+            caps_str = ", ".join(capabilities)
+            return f"✅ Account *{name}* ({acc_type}) added!\nCapabilities: {caps_str}"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")

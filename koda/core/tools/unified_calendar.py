@@ -181,9 +181,10 @@ Parameters for 'create':
                 email=account.get("email", ""),
                 password=account.get("password", ""),
                 server=account.get("server", ""),
+                username=account.get("username", "") or account.get("email", ""),
                 version=account.get("version", "auto"),
                 auth_type=account.get("auth_type", "basic"),
-                use_autodiscover=account.get("use_autodiscover", True)
+                use_autodiscover=account.get("use_autodiscover", False)
             )
         elif account_type == "caldav":
             from koda.integrations.caldav_client import CalDAVClient

@@ -114,60 +114,79 @@ class WebSearchConfig(BaseModel):
 
 
 # =============================================================================
-# Named Account Models - Allow multiple accounts with custom names
+# Unified Account Model - One account, multiple capabilities
 # =============================================================================
 
-class CalendarAccount(BaseModel):
-    """A named calendar account that can be Google, Exchange, or CalDAV."""
-    name: str = ""  # User-friendly name like "Werk", "Privé", "Familie"
-    type: str = ""  # "google", "exchange", "caldav"
+class Account(BaseModel):
+    """A unified account that can provide email, calendar, and/or contacts.
+    
+    This replaces separate CalendarAccount and EmailAccount models.
+    An Exchange account is stored ONCE and provides all its capabilities.
+    
+    Types:
+    - exchange: Email + Calendar + Contacts
+    - google: Email (Gmail) + Calendar
+    - imap: Email only
+    - caldav: Calendar only
+    - icloud: Contacts only
+    """
+    name: str = ""  # User-friendly name like "Werk", "Privé"
+    type: str = ""  # "exchange", "google", "imap", "caldav", "icloud"
     enabled: bool = True
+    
+    # What this account provides
+    capabilities: list[str] = Field(default_factory=list)  # ["email", "calendar", "contacts"]
+    
+    # Common fields
+    email: str = ""
+    username: str = ""  # Optional: if different from email (e.g., DOMAIN\\user)
+    password: str = ""
+    
+    # Exchange-specific
+    server: str = ""  # e.g., "exchange.company.com" or "outlook.office365.com"
+    use_autodiscover: bool = False  # Default to False - use specified server
+    calendar_name: str = "Calendar"
+    version: str = "auto"  # auto, 2013, 2016, 2019, o365
+    auth_type: str = "basic"  # basic, ntlm, oauth2
     
     # Google-specific
     credentials_file: str = "~/.koda/google_credentials.json"
     token_file: str = "~/.koda/google_token.json"
     calendar_ids: list[str] = Field(default_factory=lambda: ["primary"])
     
-    # Exchange-specific
-    email: str = ""
-    username: str = ""  # Optional: if different from email (e.g., DOMAIN\\user)
-    password: str = ""
-    server: str = ""
-    calendar_name: str = "Calendar"
-    version: str = "auto"  # auto, 2013, 2016, 2019, o365
-    auth_type: str = "basic"  # basic, ntlm, oauth2
-    use_autodiscover: bool = True
-    
-    # CalDAV-specific
-    url: str = ""
-    # username is shared with Exchange
-    # password is shared with Exchange
-    calendar_path: str = ""
-
-
-class EmailAccount(BaseModel):
-    """A named email account that can be Gmail, Exchange, or IMAP."""
-    name: str = ""  # User-friendly name like "Werk Mail", "Privé Mail"
-    type: str = ""  # "gmail", "exchange", "imap"
-    enabled: bool = True
-    
-    # Gmail uses same credentials as Google Calendar
-    google_credentials_file: str = "~/.koda/google_credentials.json"
-    google_token_file: str = "~/.koda/google_token.json"
-    
-    # Exchange-specific (shares with calendar)
-    email: str = ""
-    username: str = ""  # Optional: if different from email
-    password: str = ""
-    server: str = ""
-    
     # IMAP-specific
-    host: str = ""
+    host: str = ""  # IMAP server hostname
     port: int = 993
-    username: str = ""
-    # password is shared
     use_ssl: bool = True
     folder: str = "INBOX"
+    
+    # CalDAV-specific
+    url: str = ""  # CalDAV URL
+    calendar_path: str = ""
+    
+    # iCloud-specific
+    apple_id: str = ""
+    
+    def has_capability(self, cap: str) -> bool:
+        """Check if this account has a specific capability."""
+        return cap in self.capabilities
+    
+    @property
+    def has_email(self) -> bool:
+        return "email" in self.capabilities
+    
+    @property
+    def has_calendar(self) -> bool:
+        return "calendar" in self.capabilities
+    
+    @property
+    def has_contacts(self) -> bool:
+        return "contacts" in self.capabilities
+
+
+# Legacy aliases for backward compatibility
+CalendarAccount = Account
+EmailAccount = Account
 
 
 # =============================================================================
@@ -307,9 +326,12 @@ class ReminderConfig(BaseModel):
 
 class IntegrationsConfig(BaseModel):
     """External integrations configuration."""
-    # Named accounts - unlimited, user-defined names
-    calendar_accounts: list[CalendarAccount] = Field(default_factory=list)
-    email_accounts: list[EmailAccount] = Field(default_factory=list)
+    # Unified accounts list - one account provides multiple capabilities
+    accounts: list[Account] = Field(default_factory=list)
+    
+    # Legacy lists (kept for migration, will be merged into accounts)
+    calendar_accounts: list[Account] = Field(default_factory=list)
+    email_accounts: list[Account] = Field(default_factory=list)
     
     # Legacy single-account configs (for backward compatibility)
     google: GoogleConfig = Field(default_factory=GoogleConfig)
@@ -323,86 +345,152 @@ class IntegrationsConfig(BaseModel):
     birthday: BirthdayConfig = Field(default_factory=BirthdayConfig)
     reminder: ReminderConfig = Field(default_factory=ReminderConfig)
     
-    def get_all_calendars(self) -> list[CalendarAccount]:
-        """Get all calendar accounts (named + legacy converted to named)."""
-        calendars = list(self.calendar_accounts)
+    def get_all_accounts(self) -> list[Account]:
+        """Get all unified accounts (new + legacy merged + old configs converted)."""
+        all_accounts: dict[str, Account] = {}
         
-        # Convert legacy configs to named accounts
+        # 1. New unified accounts list
+        for acc in self.accounts:
+            if acc.name and acc.enabled:
+                all_accounts[acc.name] = acc
+        
+        # 2. Migrate legacy calendar_accounts (add calendar capability)
+        for acc in self.calendar_accounts:
+            if isinstance(acc, dict):
+                name = acc.get("name", "")
+                if name in all_accounts:
+                    # Merge: add calendar capability
+                    if "calendar" not in all_accounts[name].capabilities:
+                        all_accounts[name].capabilities.append("calendar")
+                else:
+                    # Create new with calendar capability
+                    caps = acc.get("capabilities", [])
+                    if "calendar" not in caps:
+                        caps = caps + ["calendar"]
+                    all_accounts[name] = Account(**{**acc, "capabilities": caps})
+            elif acc.name:
+                if acc.name in all_accounts:
+                    if "calendar" not in all_accounts[acc.name].capabilities:
+                        all_accounts[acc.name].capabilities.append("calendar")
+                else:
+                    if "calendar" not in acc.capabilities:
+                        acc.capabilities.append("calendar")
+                    all_accounts[acc.name] = acc
+        
+        # 3. Migrate legacy email_accounts (add email capability)
+        for acc in self.email_accounts:
+            if isinstance(acc, dict):
+                name = acc.get("name", "")
+                if name in all_accounts:
+                    if "email" not in all_accounts[name].capabilities:
+                        all_accounts[name].capabilities.append("email")
+                else:
+                    caps = acc.get("capabilities", [])
+                    if "email" not in caps:
+                        caps = caps + ["email"]
+                    all_accounts[name] = Account(**{**acc, "capabilities": caps})
+            elif acc.name:
+                if acc.name in all_accounts:
+                    if "email" not in all_accounts[acc.name].capabilities:
+                        all_accounts[acc.name].capabilities.append("email")
+                else:
+                    if "email" not in acc.capabilities:
+                        acc.capabilities.append("email")
+                    all_accounts[acc.name] = acc
+        
+        # 4. Convert old legacy single configs
         if self.google.enabled:
-            calendars.append(CalendarAccount(
-                name="Google",
-                type="google",
-                enabled=True,
-                credentials_file=self.google.credentials_file,
-                token_file=self.google.token_file,
-                calendar_ids=self.google.calendar_ids
-            ))
+            if "Google" not in all_accounts:
+                all_accounts["Google"] = Account(
+                    name="Google",
+                    type="google",
+                    enabled=True,
+                    capabilities=["email", "calendar"],
+                    credentials_file=self.google.credentials_file,
+                    token_file=self.google.token_file,
+                    calendar_ids=self.google.calendar_ids
+                )
         
         if self.exchange.enabled:
-            calendars.append(CalendarAccount(
-                name="Exchange",
-                type="exchange",
-                enabled=True,
-                email=self.exchange.email,
-                password=self.exchange.password,
-                server=self.exchange.server,
-                calendar_name=self.exchange.calendar_name,
-                version=self.exchange.version,
-                auth_type=self.exchange.auth_type,
-                use_autodiscover=self.exchange.use_autodiscover
-            ))
+            if "Exchange" not in all_accounts:
+                all_accounts["Exchange"] = Account(
+                    name="Exchange",
+                    type="exchange",
+                    enabled=True,
+                    capabilities=["email", "calendar", "contacts"],
+                    email=self.exchange.email,
+                    username=self.exchange.username,
+                    password=self.exchange.password,
+                    server=self.exchange.server,
+                    calendar_name=self.exchange.calendar_name,
+                    version=self.exchange.version,
+                    auth_type=self.exchange.auth_type,
+                    use_autodiscover=self.exchange.use_autodiscover
+                )
         
         if self.caldav.enabled:
-            calendars.append(CalendarAccount(
-                name="CalDAV",
-                type="caldav",
-                enabled=True,
-                url=self.caldav.url,
-                username=self.caldav.username,
-                password=self.caldav.password,
-                calendar_path=self.caldav.calendar_path
-            ))
-        
-        return calendars
-    
-    def get_all_email_accounts(self) -> list[EmailAccount]:
-        """Get all email accounts (named + legacy converted to named)."""
-        emails = list(self.email_accounts)
-        
-        # Convert legacy configs to named accounts
-        if self.google.enabled:
-            emails.append(EmailAccount(
-                name="Gmail",
-                type="gmail",
-                enabled=True,
-                google_credentials_file=self.google.credentials_file,
-                google_token_file=self.google.token_file
-            ))
-        
-        if self.exchange.enabled:
-            emails.append(EmailAccount(
-                name="Exchange",
-                type="exchange",
-                enabled=True,
-                email=self.exchange.email,
-                password=self.exchange.password,
-                server=self.exchange.server
-            ))
+            if "CalDAV" not in all_accounts:
+                all_accounts["CalDAV"] = Account(
+                    name="CalDAV",
+                    type="caldav",
+                    enabled=True,
+                    capabilities=["calendar"],
+                    url=self.caldav.url,
+                    username=self.caldav.username,
+                    password=self.caldav.password,
+                    calendar_path=self.caldav.calendar_path
+                )
         
         if self.imap.enabled:
-            emails.append(EmailAccount(
-                name="IMAP",
-                type="imap",
-                enabled=True,
-                host=self.imap.host,
-                port=self.imap.port,
-                username=self.imap.username,
-                password=self.imap.password,
-                use_ssl=self.imap.use_ssl,
-                folder=self.imap.folder
-            ))
+            if "IMAP" not in all_accounts:
+                all_accounts["IMAP"] = Account(
+                    name="IMAP",
+                    type="imap",
+                    enabled=True,
+                    capabilities=["email"],
+                    host=self.imap.host,
+                    port=self.imap.port,
+                    username=self.imap.username,
+                    password=self.imap.password,
+                    use_ssl=self.imap.use_ssl,
+                    folder=self.imap.folder
+                )
         
-        return emails
+        if self.icloud.enabled:
+            if "iCloud" not in all_accounts:
+                all_accounts["iCloud"] = Account(
+                    name="iCloud",
+                    type="icloud",
+                    enabled=True,
+                    capabilities=["contacts"],
+                    apple_id=self.icloud.apple_id,
+                    password=self.icloud.password
+                )
+        
+        return list(all_accounts.values())
+    
+    def get_accounts_with_capability(self, capability: str) -> list[Account]:
+        """Get all accounts that have a specific capability."""
+        return [acc for acc in self.get_all_accounts() if capability in acc.capabilities]
+    
+    def get_all_calendars(self) -> list[Account]:
+        """Get all accounts with calendar capability."""
+        return self.get_accounts_with_capability("calendar")
+    
+    def get_all_email_accounts(self) -> list[Account]:
+        """Get all accounts with email capability."""
+        return self.get_accounts_with_capability("email")
+    
+    def get_all_contacts_accounts(self) -> list[Account]:
+        """Get all accounts with contacts capability."""
+        return self.get_accounts_with_capability("contacts")
+    
+    def get_account_by_name(self, name: str) -> Account | None:
+        """Find an account by name."""
+        for acc in self.get_all_accounts():
+            if acc.name == name:
+                return acc
+        return None
 
 
 class WebToolsConfig(BaseModel):

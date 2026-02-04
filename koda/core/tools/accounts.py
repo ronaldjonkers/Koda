@@ -1,6 +1,9 @@
-"""Tool for listing available accounts (email and calendar)."""
+"""Tool for listing available accounts (unified model with capabilities)."""
 
 from typing import Any
+
+from loguru import logger
+
 from koda.core.tools.base import Tool
 
 
@@ -8,15 +11,16 @@ class AccountsTool(Tool):
     """Tool for the LLM to discover available accounts."""
     
     name = "accounts"
-    description = """List all available email and calendar accounts.
+    description = """List all configured accounts with their capabilities.
     
-Use this tool to discover which accounts are configured before using email or calendar tools.
-This helps you know exactly which accounts you can access.
+Each account can have multiple capabilities: email, calendar, contacts.
+For example, an Exchange account provides all three from a single configuration.
 
 Actions:
-- list: List all accounts (email and calendar)
-- calendars: List only calendar accounts
-- emails: List only email accounts
+- list: List all accounts with their capabilities
+- calendars: List accounts with calendar capability
+- emails: List accounts with email capability
+- contacts: List accounts with contacts capability
 
 Examples:
 - List all: {"action": "list"}
@@ -29,7 +33,7 @@ Examples:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "calendars", "emails"],
+                "enum": ["list", "calendars", "emails", "contacts"],
                 "description": "What to list",
                 "default": "list"
             }
@@ -38,144 +42,119 @@ Examples:
     }
     
     def __init__(self, config: Any = None):
-        """
-        Initialize with the app config.
-        
-        Args:
-            config: The KodaConfig object with integrations
-        """
         self.config = config
     
     async def execute(self, **kwargs) -> str:
         action = kwargs.get("action", "list")
         
-        if not self.config:
-            return "No configuration available. Cannot list accounts."
-        
-        integrations = getattr(self.config, 'integrations', None)
-        if not integrations:
-            return "No integrations configured."
-        
-        output = []
-        
-        if action in ("list", "calendars"):
-            output.append("**📅 Calendar Accounts:**\n")
-            calendars = self._get_calendar_accounts(integrations)
-            if calendars:
-                for cal in calendars:
-                    status = "✅" if cal.get("enabled", True) else "❌"
-                    output.append(f"{status} **{cal['name']}** ({cal['type']})")
-                    if cal.get("email"):
-                        output.append(f"   📧 {cal['email']}")
+        try:
+            if not self.config:
+                return "❌ No configuration available. Cannot list accounts."
+            
+            integrations = getattr(self.config, 'integrations', None)
+            if not integrations:
+                return "❌ No integrations configured."
+            
+            # Get all unified accounts
+            if hasattr(integrations, 'get_all_accounts'):
+                all_accounts = integrations.get_all_accounts()
             else:
-                output.append("_No calendar accounts configured_")
-            output.append("")
-        
-        if action in ("list", "emails"):
-            output.append("**📧 Email Accounts:**\n")
-            emails = self._get_email_accounts(integrations)
-            if emails:
-                for email in emails:
-                    status = "✅" if email.get("enabled", True) else "❌"
-                    output.append(f"{status} **{email['name']}** ({email['type']})")
-                    if email.get("email"):
-                        output.append(f"   📧 {email['email']}")
+                all_accounts = self._get_accounts_fallback(integrations)
+            
+            if not all_accounts:
+                return "No accounts configured. Use /addmail or /addcalendar via WhatsApp to add one."
+            
+            # Filter by capability if needed
+            if action == "calendars":
+                accounts = [a for a in all_accounts if "calendar" in self._get_caps(a)]
+                title = "📅 Calendar Accounts"
+            elif action == "emails":
+                accounts = [a for a in all_accounts if "email" in self._get_caps(a)]
+                title = "📧 Email Accounts"
+            elif action == "contacts":
+                accounts = [a for a in all_accounts if "contacts" in self._get_caps(a)]
+                title = "👥 Contacts Accounts"
             else:
-                output.append("_No email accounts configured_")
+                accounts = all_accounts
+                title = "🔗 All Configured Accounts"
+            
+            if not accounts:
+                return f"No {action} accounts configured."
+            
+            output = [f"**{title}:**\n"]
+            
+            for acc in accounts:
+                name = self._get_attr(acc, 'name', 'Unknown')
+                acc_type = self._get_attr(acc, 'type', 'unknown')
+                enabled = self._get_attr(acc, 'enabled', True)
+                email = self._get_attr(acc, 'email', '')
+                caps = self._get_caps(acc)
+                
+                status = "✅" if enabled else "❌"
+                caps_icons = []
+                if "email" in caps:
+                    caps_icons.append("📧")
+                if "calendar" in caps:
+                    caps_icons.append("📅")
+                if "contacts" in caps:
+                    caps_icons.append("👥")
+                
+                output.append(f"{status} **{name}** ({acc_type}) {' '.join(caps_icons)}")
+                if email:
+                    output.append(f"   └ {email}")
+            
+            return "\n".join(output)
         
-        if not output:
-            return "No accounts found."
-        
-        return "\n".join(output)
+        except Exception as e:
+            logger.error(f"AccountsTool error: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            return f"❌ Error listing accounts: {e}"
     
-    def _get_calendar_accounts(self, integrations) -> list[dict]:
-        """Get all calendar accounts from config."""
-        accounts = []
-        
-        # New style: calendar_accounts list
-        cal_accounts = getattr(integrations, 'calendar_accounts', []) or []
-        for acc in cal_accounts:
-            if isinstance(acc, dict):
-                accounts.append(acc)
-            else:
-                # Pydantic model
-                accounts.append({
-                    "name": getattr(acc, 'name', 'Unknown'),
-                    "type": getattr(acc, 'type', 'unknown'),
-                    "enabled": getattr(acc, 'enabled', True),
-                    "email": getattr(acc, 'email', ''),
-                })
-        
-        # Legacy: check individual configs
-        google = getattr(integrations, 'google', None)
-        if google and getattr(google, 'enabled', False):
-            accounts.append({
-                "name": "Google",
-                "type": "google",
-                "enabled": True,
-            })
-        
-        exchange = getattr(integrations, 'exchange', None)
-        if exchange and getattr(exchange, 'enabled', False):
-            accounts.append({
-                "name": "Exchange",
-                "type": "exchange",
-                "enabled": True,
-                "email": getattr(exchange, 'email', ''),
-            })
-        
-        caldav = getattr(integrations, 'caldav', None)
-        if caldav and getattr(caldav, 'enabled', False):
-            accounts.append({
-                "name": "CalDAV",
-                "type": "caldav",
-                "enabled": True,
-            })
-        
-        return accounts
+    def _get_attr(self, obj: Any, key: str, default: Any = None) -> Any:
+        """Get attribute from dict or object."""
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
     
-    def _get_email_accounts(self, integrations) -> list[dict]:
-        """Get all email accounts from config."""
-        accounts = []
+    def _get_caps(self, acc: Any) -> list[str]:
+        """Get capabilities from account."""
+        caps = self._get_attr(acc, 'capabilities', [])
+        if not caps:
+            # Infer from type
+            acc_type = self._get_attr(acc, 'type', '')
+            if acc_type == 'exchange':
+                return ['email', 'calendar', 'contacts']
+            elif acc_type in ('google', 'gmail'):
+                return ['email', 'calendar']
+            elif acc_type == 'imap':
+                return ['email']
+            elif acc_type == 'caldav':
+                return ['calendar']
+            elif acc_type == 'icloud':
+                return ['contacts']
+        return caps or []
+    
+    def _get_accounts_fallback(self, integrations) -> list[dict]:
+        """Fallback: get accounts from legacy structure."""
+        accounts = {}
         
-        # New style: email_accounts list
-        email_accounts = getattr(integrations, 'email_accounts', []) or []
-        for acc in email_accounts:
-            if isinstance(acc, dict):
-                accounts.append(acc)
-            else:
-                # Pydantic model
-                accounts.append({
-                    "name": getattr(acc, 'name', 'Unknown'),
-                    "type": getattr(acc, 'type', 'unknown'),
-                    "enabled": getattr(acc, 'enabled', True),
-                    "email": getattr(acc, 'email', ''),
-                })
+        # Unified accounts list
+        for acc in getattr(integrations, 'accounts', []) or []:
+            name = self._get_attr(acc, 'name', '')
+            if name:
+                accounts[name] = acc
         
-        # Legacy: check individual configs
-        google = getattr(integrations, 'google', None)
-        if google and getattr(google, 'enabled', False):
-            accounts.append({
-                "name": "Gmail",
-                "type": "gmail",
-                "enabled": True,
-            })
+        # Legacy calendar_accounts
+        for acc in getattr(integrations, 'calendar_accounts', []) or []:
+            name = self._get_attr(acc, 'name', '')
+            if name and name not in accounts:
+                accounts[name] = acc
         
-        exchange = getattr(integrations, 'exchange', None)
-        if exchange and getattr(exchange, 'enabled', False):
-            accounts.append({
-                "name": "Exchange",
-                "type": "exchange",
-                "enabled": True,
-                "email": getattr(exchange, 'email', ''),
-            })
+        # Legacy email_accounts
+        for acc in getattr(integrations, 'email_accounts', []) or []:
+            name = self._get_attr(acc, 'name', '')
+            if name and name not in accounts:
+                accounts[name] = acc
         
-        imap = getattr(integrations, 'imap', None)
-        if imap and getattr(imap, 'enabled', False):
-            accounts.append({
-                "name": "IMAP",
-                "type": "imap",
-                "enabled": True,
-            })
-        
-        return accounts
+        return list(accounts.values())

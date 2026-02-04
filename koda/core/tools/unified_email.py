@@ -83,12 +83,27 @@ Examples:
         self._clients = {}
     
     def _get_accounts(self) -> list[dict]:
-        """Get all email accounts from config (handles both dicts and Pydantic models)."""
+        """Get all accounts with email capability from unified accounts."""
         if not self.config or not hasattr(self.config, 'integrations'):
             return []
         
+        integrations = self.config.integrations
         accounts = []
-        raw_accounts = getattr(self.config.integrations, 'email_accounts', []) or []
+        
+        # Use new unified method if available
+        if hasattr(integrations, 'get_all_email_accounts'):
+            raw_accounts = integrations.get_all_email_accounts()
+        else:
+            # Fallback: check multiple sources
+            raw_accounts = []
+            # Unified accounts with email capability
+            for acc in getattr(integrations, 'accounts', []) or []:
+                caps = _get_attr(acc, 'capabilities', [])
+                if 'email' in caps or _get_attr(acc, 'type', '') in ('exchange', 'google', 'imap'):
+                    raw_accounts.append(acc)
+            # Legacy email_accounts
+            for acc in getattr(integrations, 'email_accounts', []) or []:
+                raw_accounts.append(acc)
         
         for acc in raw_accounts:
             if isinstance(acc, dict):
@@ -99,6 +114,7 @@ Examples:
                     "name": getattr(acc, 'name', ''),
                     "type": getattr(acc, 'type', ''),
                     "enabled": getattr(acc, 'enabled', True),
+                    "capabilities": getattr(acc, 'capabilities', []),
                     "email": getattr(acc, 'email', ''),
                     "username": getattr(acc, 'username', ''),
                     "password": getattr(acc, 'password', ''),
@@ -106,10 +122,19 @@ Examples:
                     "host": getattr(acc, 'host', ''),
                     "port": getattr(acc, 'port', 993),
                     "use_ssl": getattr(acc, 'use_ssl', True),
-                    "use_autodiscover": getattr(acc, 'use_autodiscover', True),
+                    "use_autodiscover": getattr(acc, 'use_autodiscover', False),
                 })
         
-        return accounts
+        # Deduplicate by name
+        seen = set()
+        unique_accounts = []
+        for acc in accounts:
+            name = acc.get('name', '')
+            if name and name not in seen:
+                seen.add(name)
+                unique_accounts.append(acc)
+        
+        return unique_accounts
     
     def _find_account(self, account_name: str) -> dict | None:
         """Find account by name (case-insensitive)."""
