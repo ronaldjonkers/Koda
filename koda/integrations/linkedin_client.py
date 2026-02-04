@@ -100,11 +100,17 @@ class LinkedInClient:
         cookies = None
         if self.cookies_path.exists() and not self._refresh_cookies:
             try:
+                import requests
                 with open(self.cookies_path) as f:
-                    cookies = json.load(f)
+                    cookies_dict = json.load(f)
+                # Convert dict back to RequestsCookieJar
+                cookies = requests.cookies.RequestsCookieJar()
+                for name, value in cookies_dict.items():
+                    cookies.set(name, value)
                 logger.debug("Loaded LinkedIn cookies from cache")
             except Exception as e:
                 logger.warning(f"Failed to load cookies: {e}")
+                cookies = None
         
         # Authenticate
         try:
@@ -123,7 +129,8 @@ class LinkedInClient:
         if self._api and hasattr(self._api, 'client') and hasattr(self._api.client, 'cookies'):
             try:
                 self.cookies_path.parent.mkdir(parents=True, exist_ok=True)
-                cookies_dict = dict(self._api.client.cookies)
+                # Save as simple dict of name:value
+                cookies_dict = {c.name: c.value for c in self._api.client.cookies}
                 with open(self.cookies_path, 'w') as f:
                     json.dump(cookies_dict, f)
                 logger.debug("Saved LinkedIn cookies")
