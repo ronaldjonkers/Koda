@@ -13,10 +13,12 @@
 ## ✨ Key Features
 
 ### Executive Management
-- 📅 **Calendar Management** - Google Calendar & Microsoft Exchange integration
+- 📅 **Calendar Management** - Google Calendar, Microsoft Exchange & CalDAV integration (view, create, update, delete)
 - 📧 **Email Assistant** - Read, search, and send emails via Gmail or Exchange
 - 👥 **Contact Intelligence** - Access iCloud/macOS contacts with birthday tracking
 - 🔔 **Active Reminders** - Webhook and email-based reminder system
+- 📱 **iMessage/SMS** - Send and read messages via macOS Messages app
+- 🔗 **Google Meet** - Create instant Meet links, auto-add to any calendar type
 
 ### Technical Powerhouse
 - 🛠️ **Script Automation** - Generate and execute Python, Bash, and Node.js scripts
@@ -184,6 +186,8 @@ koda agent -m "What's on my calendar today?"
 | `koda config [section]` | Configure a specific section (assistant, provider, calendar, email, whatsapp, telegram) |
 | `koda status` | Show current configuration and connection status |
 | `koda setup-proxy` | Generate reverse proxy config for external access |
+| `koda setup-google` | Setup Google Workspace (Gmail, Calendar, Meet) |
+| `koda setup-linkedin` | Setup LinkedIn via browser login |
 
 ### Configuration Sections
 
@@ -436,12 +440,37 @@ Koda supports voice message transcription via Groq's Whisper API (free tier avai
 
 ## 📅 Calendar Integration
 
-### Google Calendar
+All calendar types support: **view, create, update, and delete** events.
 
-1. Create a project in [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable Calendar API
-3. Create OAuth 2.0 credentials (Desktop app)
-4. Download and save as `~/.koda/google_credentials.json`
+### Google Workspace (Recommended)
+
+Full integration with Gmail, Calendar, and Google Meet:
+
+```bash
+koda setup-google
+```
+
+This opens a browser for OAuth authentication. Features:
+- All Google Calendars (including shared)
+- Gmail read/send
+- Automatic Google Meet links
+- No API keys needed after setup
+
+### Google Calendar (Simple - App Password)
+
+Alternative setup without OAuth, using CalDAV:
+
+```bash
+# Via WhatsApp
+/addgoogle your@gmail.com your-app-password
+
+# Or CLI
+koda config caldav
+```
+
+1. Enable 2-Step Verification at myaccount.google.com/security
+2. Create App Password at myaccount.google.com/apppasswords
+3. Use the 16-character password with the command above
 
 ### Microsoft Exchange (2013/2016/2019/O365)
 
@@ -490,12 +519,39 @@ Works with any CalDAV-compatible server:
 }
 ```
 
-## 📧 Email Integration
+## � Google Meet
+
+Create instant Google Meet links or add them to calendar events.
+
+### Instant Meet Link (WhatsApp)
+
+```
+/googlemeet
+```
+
+Returns a Meet link immediately, no calendar event created.
+
+### Via Assistant
+
+```bash
+koda agent -m "Give me a Google Meet link"
+koda agent -m "Create a meeting for tomorrow at 2pm with a Meet link"
+```
+
+### Auto-Add to Exchange Events
+
+When creating Exchange calendar events, Meet links are automatically:
+- Added to the **location** field
+- Added to the **description/notes** field
+
+This requires Google Workspace to be connected (`koda setup-google`).
+
+## �📧 Email Integration
 
 The assistant can read, search, and send emails through multiple providers:
 
 ### Gmail
-Uses the same OAuth credentials as Google Calendar.
+Uses the same OAuth credentials as Google Workspace (`koda setup-google`).
 
 ### Exchange
 Uses the same configuration as Exchange Calendar.
@@ -676,6 +732,18 @@ Configure Koda directly from WhatsApp by sending commands:
 | `/removemail <name>` | Remove email account |
 | `/removecalendar <name>` | Remove calendar account |
 | `/cancel` | Cancel active setup session |
+| `/addlinkedin` | Setup LinkedIn (shows browser login instructions) |
+| `/removelinkedin` | Remove LinkedIn account |
+| `/linkedinstatus` | Check LinkedIn session status |
+| `/resetlinkedin` | Reset LinkedIn session for fresh login |
+| `/googlemeet` | Get an instant Google Meet link |
+| `/googlestatus` | Show Google Workspace connection status |
+| `/setupgoogle` | Get Google Workspace setup instructions |
+| `/addgoogle <email> <app_pw>` | Add Google Calendar via App Password |
+| `/googlehelp` | Setup instructions for Google Calendar |
+| `/addbrave <api_key>` | Set Brave Search API key |
+| `/schedules` | Show all scheduled tasks |
+| `/delschedule <id>` | Delete a scheduled task |
 
 **Examples:**
 ```
@@ -685,9 +753,9 @@ Configure Koda directly from WhatsApp by sending commands:
 /status
 ```
 
-## � LinkedIn Integration
+## 🔗 LinkedIn Integration
 
-Koda can manage your LinkedIn presence with intelligent automation.
+Koda can manage your LinkedIn presence with intelligent automation using a stable browser-based session.
 
 ### Features
 
@@ -696,36 +764,47 @@ Koda can manage your LinkedIn presence with intelligent automation.
 - **Feed Curation**: Collect interesting posts for daily review
 - **Daily Digest**: Get a WhatsApp/Telegram summary with suggested actions
 - **Smart Replies**: AI-generated reply suggestions
-- **Post Creation**: Generate and publish posts (when trust level allows)
+- **Post Creation**: Generate and publish posts with images
+- **Analytics**: View post performance and engagement
+- **Style Learning**: Analyze your writing style for consistent AI responses
 
-### Installation
+### Setup (Browser Login)
 
-```bash
-pip install koda-assistant[linkedin]
-```
-
-### Setup
+The recommended setup uses browser-based authentication for stability:
 
 ```bash
-koda config linkedin
+# Open browser for LinkedIn login
+koda setup-linkedin
+
+# Check session status
+koda setup-linkedin --status
+
+# Reset session for fresh login
+koda setup-linkedin --reset
 ```
 
-The setup wizard will ask for:
-1. **LinkedIn credentials** (email/password)
-2. **Your role** - What you do professionally
-3. **Your goals** - What you're looking for on LinkedIn
-4. **Interests** - Topics you care about
-5. **Automation preferences** - What to auto-accept/reply
+**Benefits:**
+- No 2FA issues
+- Stable persistent session
+- Supports posting with images
+- Analytics access
 
-### Configuration
+### WhatsApp Commands
+
+| Command | Description |
+|---------|-------------|
+| `/addlinkedin` | Show setup instructions |
+| `/linkedinstatus` | Check session status |
+| `/resetlinkedin` | Clear session for re-login |
+| `/removelinkedin` | Remove all LinkedIn data |
+
+### Configuration (Optional)
 
 ```json
 {
   "integrations": {
     "linkedin": {
       "enabled": true,
-      "email": "your-email@example.com",
-      "password": "your-linkedin-password",
       
       "user_role": "Software Engineer at TechCorp",
       "user_goals": "Connect with other developers, find collaboration opportunities",
@@ -734,7 +813,6 @@ The setup wizard will ask for:
       "auto_accept_connections": true,
       "auto_reply_messages": false,
       "auto_post": false,
-      "auto_react": false,
       
       "daily_digest_enabled": true,
       "daily_digest_time": "09:00",
@@ -1065,11 +1143,11 @@ Koda comes with a comprehensive set of tools:
 
 | Tool | Description |
 |------|-------------|
-| `google_calendar` | Google Calendar read/write |
-| `exchange_calendar` | Microsoft Exchange calendar |
-| `gmail` | Gmail read/send |
-| `exchange_email` | Exchange email |
+| `calendar` | Unified calendar (Google, Exchange, CalDAV) - view, create, update, delete |
+| `email` | Unified email (Gmail, Exchange) - read, search, send |
+| `google_meet` | Create Google Meet links (instant or with calendar event) |
 | `contacts` | iCloud/macOS contacts |
+| `apple_messages` | Send/read iMessage and SMS (macOS) |
 | `memory` | Vector-based semantic memory |
 | `reminder` | Schedule reminders |
 | `script` | Generate/execute scripts |
