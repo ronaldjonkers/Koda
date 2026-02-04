@@ -825,6 +825,27 @@ def gateway(
     config_watcher = start_config_watcher(on_reload=on_config_reload)
     console.print(f"[green]✓[/green] Config watcher: auto-reload on changes")
     
+    # Start email watcher for proactive email notifications
+    email_watcher = None
+    try:
+        from koda.services.email_watcher import create_email_watcher_from_config
+        
+        async def send_email_notification(phone: str, message: str):
+            """Send email notification via WhatsApp."""
+            from koda.messaging.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel="whatsapp",
+                chat_id=phone + "@s.whatsapp.net",
+                content=message
+            ))
+        
+        email_watcher = create_email_watcher_from_config(config, send_email_notification)
+        if email_watcher and email_watcher.watching_count > 0:
+            email_watcher.start()
+            console.print(f"[green]✓[/green] Email watcher: {email_watcher.watching_count} account(s) monitored")
+    except Exception as e:
+        logger.debug(f"Email watcher not started: {e}")
+    
     async def run():
         try:
             await cron.start()
@@ -841,6 +862,8 @@ def gateway(
         finally:
             console.print("\nShutting down...")
             stop_config_watcher()
+            if email_watcher:
+                email_watcher.stop()
             heartbeat.stop()
             cron.stop()
             reminder_service.stop()
