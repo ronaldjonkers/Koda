@@ -114,50 +114,62 @@ export class WhatsAppClient {
     // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // Handle incoming messages - following OpenClaw's exact pattern
+    // Handle incoming messages - using exact Baileys pattern for self-messages
     this.sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
       const { messages, type } = upsert;
       
-      // Only process notify (real-time) and append (history sync)
+      // CRITICAL: Type 'append' is often used for self-messages
+      // WhatsApp treats self-messages as sync actions, not regular incoming messages
       if (type !== 'notify' && type !== 'append') {
         return;
       }
       
-      const myJid = this.sock.user?.id;
-      const myPhone = myJid ? myJid.split('@')[0].split(':')[0] : null;
-      
       for (const msg of messages) {
-        const remoteJid = msg.key?.remoteJid;
-        if (!remoteJid) continue;
+        const jid = msg.key?.remoteJid;
+        if (!jid) continue;
         
         // Skip status updates and broadcasts
-        if (remoteJid.endsWith('@status') || remoteJid.endsWith('@broadcast')) {
+        if (jid.endsWith('@status') || jid.endsWith('@broadcast')) {
           continue;
         }
         
-        const senderPhone = remoteJid.split('@')[0].split(':')[0];
-        const isGroup = remoteJid.endsWith('@g.us');
-        const isSelfChat = !isGroup && myPhone && senderPhone === myPhone;
-        const isFromMe = Boolean(msg.key?.fromMe);
+        const isMe = Boolean(msg.key?.fromMe);
+        const isGroup = jid.endsWith('@g.us');
         
-        // Log ALL messages for debugging
-        console.log(`📨 Message: remoteJid=${remoteJid}, fromMe=${isFromMe}, isSelfChat=${isSelfChat}, type=${type}`);
+        // Determine if this is the 'Message Yourself' chat
+        // In this chat, the JID equals your own number
+        // sock.user.id format: "31614254251:123@s.whatsapp.net" -> extract "31614254251"
+        const myNumber = this.sock.user?.id?.split(':')[0];
+        const myJid = myNumber ? `${myNumber}@s.whatsapp.net` : null;
+        const isMessageToSelf = !isGroup && jid === myJid;
         
-        // OpenClaw pattern: Skip outbound DMs UNLESS it's a self-chat
-        if (isFromMe && !isSelfChat) {
+        // Log for debugging
+        console.log(`📨 Message: jid=${jid}, myJid=${myJid}, fromMe=${isMe}, isMessageToSelf=${isMessageToSelf}, type=${type}`);
+        
+        if (isMe && !isMessageToSelf) {
+          // This is a message YOU sent to SOMEONE ELSE
+          // Skip to prevent loops
+          console.log(`   ↳ Skipping: outbound message to others`);
           continue;
         }
+        
+        // If we get here, it's either:
+        // - A message FROM someone else (isMe=false)
+        // - A message you sent TO YOURSELF (isMe=true && isMessageToSelf=true)
         
         const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        if (!content) {
+          console.log(`   ↳ Skipping: no text content`);
+          continue;
+        }
         
-        const finalSender = isSelfChat && myPhone ? `${myPhone}@s.whatsapp.net` : remoteJid;
+        const sender = isMessageToSelf && myJid ? myJid : jid;
         
-        console.log(`✅ Processing: from=${finalSender}, content="${content.substring(0, 50)}..."`);
+        console.log(`✅ Processing: from=${sender}, content="${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`);
         
         this.options.onMessage({
           id: msg.key.id || '',
-          sender: finalSender,
+          sender,
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,
