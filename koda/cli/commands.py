@@ -541,33 +541,59 @@ def gateway(
         import sys
         bridge_dir = Path(__file__).parent.parent.parent / "bridge"
         
-        if bridge_dir.exists() and (bridge_dir / "dist" / "index.js").exists():
-            console.print("[dim]Starting WhatsApp bridge...[/dim]")
+        if bridge_dir.exists() and (bridge_dir / "src" / "whatsapp.ts").exists():
+            # Auto-rebuild bridge to ensure latest code
+            console.print("[dim]Building WhatsApp bridge...[/dim]")
             try:
-                # Always show bridge output for debugging
-                bridge_process = subprocess.Popen(
-                    ["node", "dist/index.js"],
+                build_result = subprocess.run(
+                    ["npm", "run", "build"],
                     cwd=str(bridge_dir),
-                    stdout=None,  # Inherit stdout to show bridge logs
-                    stderr=None,  # Inherit stderr to show bridge errors
+                    capture_output=True,
+                    text=True,
+                    timeout=30
                 )
-                # Give the bridge a moment to start
-                import time
-                time.sleep(2)
-                
-                if bridge_process.poll() is None:
-                    console.print("[green]✓[/green] WhatsApp bridge started")
+                if build_result.returncode == 0:
+                    console.print("[green]✓[/green] WhatsApp bridge built")
                 else:
-                    console.print("[yellow]⚠[/yellow] WhatsApp bridge failed to start")
-                    bridge_process = None
+                    console.print(f"[yellow]⚠[/yellow] Bridge build warning: {build_result.stderr[:200] if build_result.stderr else 'unknown'}")
+            except subprocess.TimeoutExpired:
+                console.print("[yellow]⚠[/yellow] Bridge build timed out")
             except FileNotFoundError:
-                console.print("[yellow]⚠[/yellow] Node.js not found - WhatsApp bridge not started")
-                console.print("[dim]  Install Node.js or run the bridge manually: cd bridge && npm start[/dim]")
+                console.print("[yellow]⚠[/yellow] npm not found - skipping bridge build")
             except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not start WhatsApp bridge: {e}")
+                console.print(f"[yellow]⚠[/yellow] Could not build bridge: {e}")
+            
+            # Start the bridge
+            if (bridge_dir / "dist" / "index.js").exists():
+                console.print("[dim]Starting WhatsApp bridge...[/dim]")
+                try:
+                    # Always show bridge output for debugging
+                    bridge_process = subprocess.Popen(
+                        ["node", "dist/index.js"],
+                        cwd=str(bridge_dir),
+                        stdout=None,  # Inherit stdout to show bridge logs
+                        stderr=None,  # Inherit stderr to show bridge errors
+                    )
+                    # Give the bridge a moment to start
+                    import time
+                    time.sleep(2)
+                    
+                    if bridge_process.poll() is None:
+                        console.print("[green]✓[/green] WhatsApp bridge started")
+                    else:
+                        console.print("[yellow]⚠[/yellow] WhatsApp bridge failed to start")
+                        bridge_process = None
+                except FileNotFoundError:
+                    console.print("[yellow]⚠[/yellow] Node.js not found - WhatsApp bridge not started")
+                    console.print("[dim]  Install Node.js or run the bridge manually: cd bridge && npm start[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not start WhatsApp bridge: {e}")
+            else:
+                console.print("[yellow]⚠[/yellow] WhatsApp bridge not built")
+                console.print("[dim]  Run: cd bridge && npm install && npm run build[/dim]")
         else:
-            console.print("[yellow]⚠[/yellow] WhatsApp bridge not built")
-            console.print("[dim]  Run: cd bridge && npm install && npm run build[/dim]")
+            console.print("[yellow]⚠[/yellow] WhatsApp bridge source not found")
+            console.print("[dim]  Ensure bridge/src/whatsapp.ts exists[/dim]")
     
     # Create components
     bus = MessageBus()
