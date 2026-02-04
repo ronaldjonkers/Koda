@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from loguru import logger
 from koda.core.tools.base import Tool
 from koda.integrations.linkedin_client import LinkedInClient
 
@@ -54,19 +55,28 @@ Actions:
 - reject_connection: Reject a connection request
 - send_connection: Send a connection request to someone
 
-**Posts & Feed:**
+**Posts & Feed (uses browser automation):**
 - get_feed: Get interesting posts from feed
 - get_my_posts: Get my own LinkedIn posts
 - get_post_comments: Get comments on a specific post
 - like_post: Like a post
-- comment_post: Comment on a post
+- comment_post: Comment on a post (supports @mentions)
 - reply_to_comment: Reply to a specific comment
-- create_post: Create a new LinkedIn post
+- create_post: Create a new LinkedIn post (with optional image)
+
+**Analytics & Style:**
+- get_analytics: Get profile stats and post analytics
+- learn_style: Learn user's writing style for personalized suggestions
+- get_style: Get learned writing style profile
 
 **Profiles:**
 - search_people: Search for people on LinkedIn
 - get_profile: Get someone's profile
-- get_my_profile: Get my own profile"""
+- get_my_profile: Get my own profile
+
+**Session:**
+- check_session: Check if browser session is valid
+- login: Open browser for manual login (use when session expired)"""
     
     parameters = {
         "type": "object",
@@ -78,9 +88,19 @@ Actions:
                     "get_connections", "accept_connection", "reject_connection", "send_connection",
                     "get_feed", "get_my_posts", "get_post_comments",
                     "like_post", "comment_post", "reply_to_comment", "create_post",
-                    "search_people", "get_profile", "get_my_profile"
+                    "search_people", "get_profile", "get_my_profile",
+                    "get_analytics", "learn_style", "get_style",
+                    "check_session", "login"
                 ],
                 "description": "The LinkedIn action to perform"
+            },
+            "image_path": {
+                "type": "string",
+                "description": "Path to image file for create_post"
+            },
+            "post_url": {
+                "type": "string",
+                "description": "Full LinkedIn post URL for comment_post"
             },
             "conversation_id": {
                 "type": "string",
@@ -142,6 +162,19 @@ Actions:
         self._initial_password = password
         self._initial_enabled = enabled
         self._client: Optional[LinkedInClient] = None
+        self._playwright_client = None
+        self._playwright_available = False
+        self._init_playwright()
+    
+    def _init_playwright(self):
+        """Initialize Playwright client if available."""
+        try:
+            from koda.integrations.linkedin_playwright import LinkedInPlaywright
+            self._playwright_client = LinkedInPlaywright(headless=True)
+            self._playwright_available = True
+            logger.debug("LinkedIn Playwright client initialized")
+        except ImportError as e:
+            logger.debug(f"Playwright not available for LinkedIn: {e}")
     
     def _get_config(self) -> dict:
         """Get current LinkedIn config (reloads from file each time)."""
@@ -245,6 +278,17 @@ Actions:
                 return await self._get_profile(kwargs.get('profile_id', ''))
             elif action == "get_my_profile":
                 return await self._get_my_profile()
+            # Playwright-based actions
+            elif action == "get_analytics":
+                return await self._get_analytics()
+            elif action == "learn_style":
+                return await self._learn_style()
+            elif action == "get_style":
+                return await self._get_style()
+            elif action == "check_session":
+                return await self._check_session()
+            elif action == "login":
+                return await self._login()
             else:
                 return json.dumps({"error": f"Unknown action: {action}"})
         except Exception as e:
@@ -598,4 +642,96 @@ Actions:
             "industry": profile.industry,
             "location": profile.location,
             "profile_url": profile.profile_url
+        }, indent=2)
+    
+    # =========================================================================
+    # Playwright-based methods (browser automation)
+    # =========================================================================
+    
+    async def _check_session(self) -> str:
+        """Check if browser session is valid."""
+        if not self._playwright_available:
+            return json.dumps({
+                "error": "Playwright not available",
+                "message": "Install Playwright: pip install playwright && playwright install chromium"
+            })
+        
+        valid, message = await self._playwright_client.check_session()
+        return json.dumps({
+            "valid": valid,
+            "message": message,
+            "tip": "Use 'login' action if session expired" if not valid else None
+        })
+    
+    async def _login(self) -> str:
+        """Open browser for manual login."""
+        if not self._playwright_available:
+            return json.dumps({
+                "error": "Playwright not available",
+                "message": "Install Playwright: pip install playwright && playwright install chromium"
+            })
+        
+        return json.dumps({
+            "message": "To log in to LinkedIn, run this command in terminal:",
+            "command": "python3 -c \"import asyncio; from koda.integrations.linkedin_playwright import LinkedInPlaywright; c = LinkedInPlaywright(headless=False); asyncio.run(c.login_interactive())\"",
+            "note": "After login, the session will be saved for future use"
+        })
+    
+    async def _get_analytics(self) -> str:
+        """Get profile analytics using Playwright."""
+        if not self._playwright_available:
+            return json.dumps({"error": "Playwright not available for analytics"})
+        
+        stats = await self._playwright_client.get_profile_stats()
+        
+        if not stats:
+            return json.dumps({
+                "error": "Could not retrieve analytics",
+                "tip": "Check session with 'check_session' action"
+            })
+        
+        return json.dumps({
+            "profile_views": stats.get("profile_views", 0),
+            "post_impressions": stats.get("post_impressions", 0),
+            "search_appearances": stats.get("search_appearances", 0)
+        }, indent=2)
+    
+    async def _learn_style(self) -> str:
+        """Learn user's writing style from their LinkedIn content."""
+        if not self._playwright_available:
+            return json.dumps({"error": "Playwright not available for style learning"})
+        
+        style = await self._playwright_client.learn_style()
+        
+        return json.dumps({
+            "success": True,
+            "style": {
+                "language": style.language,
+                "tone": style.tone,
+                "emoji_usage": style.emoji_usage,
+                "top_hashtags": style.top_hashtags[:5],
+                "sample_posts_count": len(style.sample_posts)
+            },
+            "message": "Style profile saved. I'll use this to match your voice when suggesting content."
+        }, indent=2)
+    
+    async def _get_style(self) -> str:
+        """Get the learned style profile."""
+        if not self._playwright_available:
+            return json.dumps({"error": "Playwright not available"})
+        
+        style = self._playwright_client.get_style()
+        
+        if not style:
+            return json.dumps({
+                "error": "No style profile found",
+                "tip": "Use 'learn_style' action to analyze your writing style"
+            })
+        
+        return json.dumps({
+            "language": style.language,
+            "tone": style.tone,
+            "emoji_usage": style.emoji_usage,
+            "top_hashtags": style.top_hashtags,
+            "sample_posts": style.sample_posts[:3] if style.sample_posts else []
         }, indent=2)
