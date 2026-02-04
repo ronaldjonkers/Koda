@@ -288,13 +288,13 @@ setup_koda() {
     # Activate virtual environment
     source .venv/bin/activate
     
-    # Install Koda with all optional dependencies
+    # Install Koda with all dependencies
     print_step "Installing Koda and dependencies..."
     if command_exists uv; then
-        uv pip install -e ".[web,linkedin]"
+        uv pip install -e ".[linkedin]"
     else
         pip install --upgrade pip
-        pip install -e ".[web,linkedin]"
+        pip install -e ".[linkedin]"
     fi
     print_success "Koda installed"
     
