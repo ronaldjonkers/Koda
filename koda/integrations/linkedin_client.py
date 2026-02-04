@@ -274,6 +274,20 @@ class LinkedInClient:
             logger.error(f"Failed to reject invitation: {e}")
             return False
     
+    def send_connection_request(self, profile_id: str, message: str = "") -> bool:
+        """Send a connection request to someone."""
+        self._ensure_connected()
+        try:
+            if message:
+                self._api.add_connection(profile_id, message=message)
+            else:
+                self._api.add_connection(profile_id)
+            logger.info(f"Sent connection request to {profile_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send connection request: {e}")
+            return False
+    
     # ==================== FEED & POSTS ====================
     
     def get_feed_posts(self, limit: int = 20) -> list[LinkedInPost]:

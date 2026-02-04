@@ -23,11 +23,20 @@ class LinkedInTool(Tool):
     description = """Manage LinkedIn: messages, connections, posts, and search.
 
 Actions:
+**Inbox/Messages:**
 - get_messages: Get unread LinkedIn messages
+- get_conversations: Get all recent conversations (inbox overview)
+- get_conversation: Get messages from a specific conversation
 - reply_message: Reply to a conversation
+- send_new_message: Start a new conversation with someone
+
+**Connections:**
 - get_connections: Get pending connection requests  
 - accept_connection: Accept a connection request
 - reject_connection: Reject a connection request
+- send_connection: Send a connection request to someone
+
+**Posts & Feed:**
 - get_feed: Get interesting posts from feed
 - get_my_posts: Get my own LinkedIn posts
 - get_post_comments: Get comments on a specific post
@@ -35,8 +44,11 @@ Actions:
 - comment_post: Comment on a post
 - reply_to_comment: Reply to a specific comment
 - create_post: Create a new LinkedIn post
+
+**Profiles:**
 - search_people: Search for people on LinkedIn
-- get_profile: Get someone's profile"""
+- get_profile: Get someone's profile
+- get_my_profile: Get my own profile"""
     
     parameters = {
         "type": "object",
@@ -44,21 +56,25 @@ Actions:
             "action": {
                 "type": "string",
                 "enum": [
-                    "get_messages", "reply_message",
-                    "get_connections", "accept_connection", "reject_connection",
+                    "get_messages", "get_conversations", "get_conversation", "reply_message", "send_new_message",
+                    "get_connections", "accept_connection", "reject_connection", "send_connection",
                     "get_feed", "get_my_posts", "get_post_comments",
                     "like_post", "comment_post", "reply_to_comment", "create_post",
-                    "search_people", "get_profile"
+                    "search_people", "get_profile", "get_my_profile"
                 ],
                 "description": "The LinkedIn action to perform"
             },
             "conversation_id": {
                 "type": "string",
-                "description": "Conversation ID for reply_message"
+                "description": "Conversation ID for reply_message or get_conversation"
             },
             "message": {
                 "type": "string",
-                "description": "Message content for reply_message or create_post"
+                "description": "Message content for reply_message, send_new_message, create_post, or send_connection"
+            },
+            "recipient_id": {
+                "type": "string",
+                "description": "Profile public ID for send_new_message or send_connection (the part after /in/)"
             },
             "invitation_id": {
                 "type": "string",
@@ -127,9 +143,21 @@ Actions:
         try:
             if action == "get_messages":
                 return await self._get_messages(kwargs.get('limit', 10))
+            elif action == "get_conversations":
+                return await self._get_conversations(kwargs.get('limit', 20))
+            elif action == "get_conversation":
+                return await self._get_conversation(
+                    kwargs.get('conversation_id', ''),
+                    kwargs.get('limit', 20)
+                )
             elif action == "reply_message":
                 return await self._reply_message(
                     kwargs.get('conversation_id', ''),
+                    kwargs.get('message', '')
+                )
+            elif action == "send_new_message":
+                return await self._send_new_message(
+                    kwargs.get('recipient_id', ''),
                     kwargs.get('message', '')
                 )
             elif action == "get_connections":
@@ -138,6 +166,11 @@ Actions:
                 return await self._accept_connection(kwargs.get('invitation_id', ''))
             elif action == "reject_connection":
                 return await self._reject_connection(kwargs.get('invitation_id', ''))
+            elif action == "send_connection":
+                return await self._send_connection(
+                    kwargs.get('recipient_id', ''),
+                    kwargs.get('message', '')
+                )
             elif action == "get_feed":
                 return await self._get_feed(kwargs.get('limit', 10))
             elif action == "get_my_posts":
@@ -169,10 +202,65 @@ Actions:
                 )
             elif action == "get_profile":
                 return await self._get_profile(kwargs.get('profile_id', ''))
+            elif action == "get_my_profile":
+                return await self._get_my_profile()
             else:
                 return json.dumps({"error": f"Unknown action: {action}"})
         except Exception as e:
             return json.dumps({"error": str(e)})
+    
+    async def _get_conversations(self, limit: int) -> str:
+        """Get all recent conversations (inbox overview)."""
+        import asyncio
+        client = self._get_client()
+        conversations = await asyncio.to_thread(client.get_conversations, limit)
+        
+        result = []
+        for conv in conversations:
+            participants = conv.get('participants', [])
+            participant_names = []
+            for p in participants:
+                member = p.get('com.linkedin.voyager.messaging.MessagingMember', {})
+                mini = member.get('miniProfile', {})
+                name = f"{mini.get('firstName', '')} {mini.get('lastName', '')}".strip()
+                if name and not member.get('isSelf', False):
+                    participant_names.append(name)
+            
+            result.append({
+                "conversation_id": conv.get('entityUrn', ''),
+                "participants": participant_names or ["Unknown"],
+                "unread_count": conv.get('unreadCount', 0),
+                "last_activity": conv.get('lastActivityAt', 0)
+            })
+        
+        return json.dumps({
+            "conversations": result,
+            "count": len(result)
+        }, indent=2)
+    
+    async def _get_conversation(self, conversation_id: str, limit: int) -> str:
+        """Get messages from a specific conversation."""
+        if not conversation_id:
+            return json.dumps({"error": "conversation_id is required"})
+        
+        import asyncio
+        client = self._get_client()
+        messages = await asyncio.to_thread(client.get_conversation_messages, conversation_id, limit)
+        
+        result = []
+        for msg in messages:
+            result.append({
+                "from": msg.sender_name,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat(),
+                "is_from_me": msg.is_from_me
+            })
+        
+        return json.dumps({
+            "messages": result,
+            "count": len(result),
+            "conversation_id": conversation_id
+        }, indent=2)
     
     async def _get_messages(self, limit: int) -> str:
         """Get unread messages."""
@@ -206,6 +294,21 @@ Actions:
         return json.dumps({
             "success": success,
             "conversation_id": conversation_id
+        })
+    
+    async def _send_new_message(self, recipient_id: str, message: str) -> str:
+        """Send a new message to someone (start new conversation)."""
+        if not recipient_id or not message:
+            return json.dumps({"error": "recipient_id and message are required"})
+        
+        import asyncio
+        client = self._get_client()
+        success = await asyncio.to_thread(client.send_message_to_profile, recipient_id, message)
+        
+        return json.dumps({
+            "success": success,
+            "recipient_id": recipient_id,
+            "action": "message_sent"
         })
     
     async def _get_connections(self) -> str:
@@ -257,6 +360,21 @@ Actions:
             "success": success,
             "invitation_id": invitation_id,
             "action": "rejected"
+        })
+    
+    async def _send_connection(self, recipient_id: str, message: str = "") -> str:
+        """Send a connection request to someone."""
+        if not recipient_id:
+            return json.dumps({"error": "recipient_id is required"})
+        
+        import asyncio
+        client = self._get_client()
+        success = await asyncio.to_thread(client.send_connection_request, recipient_id, message)
+        
+        return json.dumps({
+            "success": success,
+            "recipient_id": recipient_id,
+            "action": "connection_request_sent"
         })
     
     async def _get_feed(self, limit: int) -> str:
@@ -413,6 +531,24 @@ Actions:
         
         if not profile:
             return json.dumps({"error": f"Profile not found: {profile_id}"})
+        
+        return json.dumps({
+            "name": f"{profile.first_name} {profile.last_name}",
+            "headline": profile.headline,
+            "summary": profile.summary,
+            "industry": profile.industry,
+            "location": profile.location,
+            "profile_url": profile.profile_url
+        }, indent=2)
+    
+    async def _get_my_profile(self) -> str:
+        """Get my own profile."""
+        import asyncio
+        client = self._get_client()
+        profile = await asyncio.to_thread(client.get_my_profile)
+        
+        if not profile:
+            return json.dumps({"error": "Could not retrieve your profile"})
         
         return json.dumps({
             "name": f"{profile.first_name} {profile.last_name}",
