@@ -831,8 +831,13 @@ class SetupWizard:
         """Test Exchange connection."""
         try:
             from exchangelib import Credentials, Account, Configuration, DELEGATE
-            from exchangelib import Version, Build
+            from exchangelib import Version, Build, NTLM, BASIC
             from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+            import requests
+            
+            # Disable SSL warnings for testing
+            import urllib3
+            urllib3.disable_warnings()
             
             # Version mapping
             version_map = {
@@ -845,37 +850,97 @@ class SetupWizard:
             
             # Use username if provided, otherwise use email
             auth_user = username if username else email
-            credentials = Credentials(auth_user, password)
+            
+            # Try to set up HTTP adapter for self-signed certificates
+            BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+            
+            console.print("[dim]Trying connection with provided credentials...[/dim]")
             
             if server:
-                config = Configuration(
-                    server=server,
-                    credentials=credentials,
-                    version=version_map.get(version)
-                )
-                account = Account(
-                    email,
-                    credentials=credentials,
-                    config=config,
-                    autodiscover=False,
-                    access_type=DELEGATE
-                )
+                # Try with explicit server configuration
+                # First try basic auth
+                try:
+                    console.print(f"[dim]Attempting basic auth to {server}...[/dim]")
+                    credentials = Credentials(auth_user, password)
+                    config = Configuration(
+                        server=server,
+                        credentials=credentials,
+                        auth_type=BASIC,
+                        version=version_map.get(version)
+                    )
+                    account = Account(
+                        email,
+                        credentials=credentials,
+                        config=config,
+                        autodiscover=False,
+                        access_type=DELEGATE
+                    )
+                    # Try to access inbox to test connection
+                    inbox = account.inbox
+                    total_count = inbox.total_count
+                    return True, f"Connected to {server} ({total_count} items in inbox)"
+                except Exception as e1:
+                    console.print(f"[dim]Basic auth failed: {str(e1)[:100]}[/dim]")
+                    
+                    # Try NTLM auth
+                    try:
+                        console.print(f"[dim]Attempting NTLM auth to {server}...[/dim]")
+                        credentials = Credentials(auth_user, password)
+                        config = Configuration(
+                            server=server,
+                            credentials=credentials,
+                            auth_type=NTLM,
+                            version=version_map.get(version)
+                        )
+                        account = Account(
+                            email,
+                            credentials=credentials,
+                            config=config,
+                            autodiscover=False,
+                            access_type=DELEGATE
+                        )
+                        # Try to access inbox
+                        inbox = account.inbox
+                        total_count = inbox.total_count
+                        return True, f"Connected to {server} with NTLM ({total_count} items in inbox)"
+                    except Exception as e2:
+                        console.print(f"[dim]NTLM auth failed: {str(e2)[:100]}[/dim]")
+                        
+                        # Last resort: try autodiscover even though server was specified
+                        try:
+                            console.print(f"[dim]Attempting autodiscover...[/dim]")
+                            credentials = Credentials(auth_user, password)
+                            account = Account(
+                                email,
+                                credentials=credentials,
+                                autodiscover=True,
+                                access_type=DELEGATE
+                            )
+                            inbox = account.inbox
+                            total_count = inbox.total_count
+                            return True, f"Connected via autodiscover ({total_count} items in inbox)"
+                        except Exception as e3:
+                            return False, f"All methods failed. Last error: {str(e3)[:200]}"
             else:
+                # Use autodiscover
+                console.print(f"[dim]Using autodiscover for {email}...[/dim]")
+                credentials = Credentials(auth_user, password)
                 account = Account(
                     email,
                     credentials=credentials,
                     autodiscover=True,
                     access_type=DELEGATE
                 )
-            
-            # Try to access inbox
-            inbox = account.inbox
-            return True, f"Connected to {account.primary_smtp_address}"
+                inbox = account.inbox
+                total_count = inbox.total_count
+                return True, f"Connected via autodiscover ({total_count} items in inbox)"
         
         except ImportError:
             return False, "exchangelib not installed. Run: pip install exchangelib"
         except Exception as e:
-            return False, str(e)
+            import traceback
+            console.print(f"[red]Full error:[/red]\n{traceback.format_exc()}")
+            return False, f"Error: {str(e)[:200]}"
     
     def _setup_caldav(self) -> None:
         """Configure CalDAV calendar."""
