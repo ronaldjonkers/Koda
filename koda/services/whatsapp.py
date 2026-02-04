@@ -1023,16 +1023,13 @@ Send a number:"""
             return "❌ Choose a number (1-7):"
     
     async def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
-        """Save Exchange account as unified account with email+calendar+contacts capabilities."""
-        config = load_config()
+        """Save Exchange account using shared AccountManager."""
+        from koda.config.accounts import AccountManager
         
         try:
-            # Create unified account with all Exchange capabilities
             account_data = {
                 "name": data.get("name", "Exchange"),
                 "type": "exchange",
-                "enabled": True,
-                "capabilities": ["email", "calendar", "contacts"],
                 "email": data.get("email"),
                 "username": data.get("username"),
                 "password": data.get("password"),
@@ -1040,29 +1037,14 @@ Send a number:"""
                 "use_autodiscover": data.get("use_autodiscover", False)
             }
             
-            # Add to unified accounts list
-            if not hasattr(config.integrations, 'accounts') or config.integrations.accounts is None:
-                config.integrations.accounts = []
+            manager = AccountManager()
+            success, message = manager.add_account(account_data)
             
-            # Check if account with same name exists, update it
-            existing_idx = None
-            for i, acc in enumerate(config.integrations.accounts):
-                acc_name = acc.get("name") if isinstance(acc, dict) else getattr(acc, "name", "")
-                if acc_name == account_data["name"]:
-                    existing_idx = i
-                    break
-            
-            if existing_idx is not None:
-                config.integrations.accounts[existing_idx] = account_data
-            else:
-                config.integrations.accounts.append(account_data)
-            
-            save_config(config)
-            
-            # Auto-reload config
-            await self._auto_reload_config()
-            
-            return f"""✅ *Exchange account added!*
+            if success:
+                # Auto-reload config
+                await self._auto_reload_config()
+                
+                return f"""✅ *Exchange account added!*
 
 Account *{data['name']}* is configured for:
 • 📧 Email
@@ -1070,137 +1052,65 @@ Account *{data['name']}* is configured for:
 • 👥 Contacts
 
 The account is now active."""
+            else:
+                return f"❌ {message}"
         
         except Exception as e:
             logger.error(f"Error saving Exchange account: {e}")
             return f"❌ Error saving: {e}"
     
     async def _save_account_from_data(self, account_type: str, data: dict) -> str:
-        """Save account to unified accounts list with appropriate capabilities."""
-        config = load_config()
+        """Save account using shared AccountManager."""
+        from koda.config.accounts import AccountManager
         
         try:
-            name = data.get("name", "Account")
-            acc_type = data.get("type", "unknown")
+            account_data = dict(data)  # Copy to avoid mutation
             
-            # Determine capabilities based on account type
-            if acc_type == "exchange":
-                capabilities = ["email", "calendar", "contacts"]
-            elif acc_type == "google":
-                capabilities = ["email", "calendar"]
-            elif acc_type == "imap":
-                capabilities = ["email"]
-            elif acc_type == "caldav":
-                capabilities = ["calendar"]
-            elif acc_type == "icloud":
-                capabilities = ["contacts"]
+            manager = AccountManager()
+            success, message = manager.add_account(account_data)
+            
+            if success:
+                await self._auto_reload_config()
+                name = data.get("name", "Account")
+                acc_type = data.get("type", "unknown")
+                return f"✅ Account *{name}* ({acc_type}) added!\n{message}"
             else:
-                # Default: use the requested type
-                capabilities = [account_type] if account_type in ["email", "calendar", "contacts"] else []
-            
-            account_data = {
-                "name": name,
-                "type": acc_type,
-                "enabled": True,
-                "capabilities": capabilities,
-            }
-            
-            # Copy relevant fields
-            for key in ["email", "username", "password", "server", "host", "port", "url", "use_ssl", "use_autodiscover"]:
-                if key in data:
-                    account_data[key] = data[key]
-            
-            # Add to unified accounts list
-            if not hasattr(config.integrations, 'accounts') or config.integrations.accounts is None:
-                config.integrations.accounts = []
-            
-            # Check if account with same name exists, update it
-            existing_idx = None
-            for i, acc in enumerate(config.integrations.accounts):
-                acc_name = acc.get("name") if isinstance(acc, dict) else getattr(acc, "name", "")
-                if acc_name == name:
-                    existing_idx = i
-                    break
-            
-            if existing_idx is not None:
-                config.integrations.accounts[existing_idx] = account_data
-            else:
-                config.integrations.accounts.append(account_data)
-            
-            save_config(config)
-            
-            # Auto-reload config
-            await self._auto_reload_config()
-            
-            caps_str = ", ".join(capabilities)
-            return f"✅ Account *{name}* ({acc_type}) added!\nCapabilities: {caps_str}"
+                return f"❌ {message}"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
             return f"❌ Error saving: {e}"
     
     def _save_account_from_json(self, account_type: str, data: dict) -> str:
-        """Save account from JSON data."""
-        config = load_config()
+        """Save account from JSON data using shared AccountManager."""
+        from koda.config.accounts import AccountManager
         
         try:
-            name = data.get("name", "Account")
-            acc_type = data.get("type", "unknown")
+            manager = AccountManager()
+            success, message = manager.add_account(data)
             
-            if account_type == "email":
-                # Ensure email_accounts list exists
-                if not hasattr(config.integrations, 'email_accounts') or config.integrations.email_accounts is None:
-                    config.integrations.email_accounts = []
-                
-                account = {
-                    "name": name,
-                    "type": acc_type,
-                    "enabled": True,
-                    **data
-                }
-                config.integrations.email_accounts.append(account)
-                save_config(config)
-                return f"✅ Email account *{name}* ({acc_type}) added!"
-            
-            else:  # calendar
-                # Ensure calendar_accounts list exists
-                if not hasattr(config.integrations, 'calendar_accounts') or config.integrations.calendar_accounts is None:
-                    config.integrations.calendar_accounts = []
-                
-                account = {
-                    "name": name,
-                    "type": acc_type,
-                    "enabled": True,
-                    **data
-                }
-                config.integrations.calendar_accounts.append(account)
-                save_config(config)
-                return f"✅ Calendar account *{name}* ({acc_type}) added!"
+            if success:
+                name = data.get("name", "Account")
+                return f"✅ Account *{name}* added!\n{message}"
+            else:
+                return f"❌ {message}"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
             return f"❌ Error saving: {e}"
     
     def _remove_account(self, config, account_type: str, name: str) -> str:
-        """Remove an account by name."""
+        """Remove an account by name using shared AccountManager."""
+        from koda.config.accounts import AccountManager
+        
         try:
-            if account_type == "email":
-                accounts = getattr(config.integrations, 'email_accounts', []) or []
-                new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
-                if len(new_accounts) == len(accounts):
-                    return f"❌ Email account '{name}' not found."
-                config.integrations.email_accounts = new_accounts
-                save_config(config)
-                return f"✅ Email account *{name}* removed."
+            manager = AccountManager()
+            success, message = manager.remove_account(name)
             
-            else:  # calendar
-                accounts = getattr(config.integrations, 'calendar_accounts', []) or []
-                new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
-                if len(new_accounts) == len(accounts):
-                    return f"❌ Calendar account '{name}' not found."
-                config.integrations.calendar_accounts = new_accounts
-                save_config(config)
-                return f"✅ Calendar account *{name}* removed."
+            if success:
+                return f"✅ Account *{name}* removed."
+            else:
+                return f"❌ {message}"
         
         except Exception as e:
             logger.error(f"Error removing account: {e}")

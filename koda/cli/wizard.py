@@ -19,10 +19,24 @@ class SetupWizard:
     def __init__(self):
         from koda.config.loader import load_config, save_config, get_config_path
         from koda.config.schema import Config
+        from koda.config.accounts import AccountManager
         
         self.config_path = get_config_path()
         self.config = load_config() if self.config_path.exists() else Config()
         self.save_config = save_config
+        self.account_manager = AccountManager(self.config)
+    
+    def _save_unified_account(self, account) -> tuple[bool, str]:
+        """Save account using unified AccountManager."""
+        # Convert Pydantic model to dict
+        if hasattr(account, 'model_dump'):
+            data = account.model_dump()
+        elif hasattr(account, 'dict'):
+            data = account.dict()
+        else:
+            data = dict(account)
+        
+        return self.account_manager.add_account(data)
     
     def run(self) -> None:
         """Run the complete setup wizard."""
@@ -479,10 +493,12 @@ class SetupWizard:
             success = False
         
         if success:
-            # Only add if not already in list (retry case)
-            if account not in self.config.integrations.calendar_accounts:
-                self.config.integrations.calendar_accounts.append(account)
-            console.print(f"\n[green]✓[/green] Calendar account '{account.name}' added successfully!")
+            # Save to unified accounts list
+            save_success, save_msg = self._save_unified_account(account)
+            if save_success:
+                console.print(f"\n[green]✓[/green] Calendar account '{account.name}' added successfully!")
+            else:
+                console.print(f"\n[yellow]![/yellow] {save_msg}")
         else:
             if not Confirm.ask("Configuration failed. Try again with same settings?", default=True):
                 return
@@ -1106,10 +1122,12 @@ class SetupWizard:
             success = False
         
         if success:
-            # Only add if not already in list (retry case)
-            if account not in self.config.integrations.email_accounts:
-                self.config.integrations.email_accounts.append(account)
-            console.print(f"\n[green]✓[/green] Email account '{account.name}' added successfully!")
+            # Save to unified accounts list
+            save_success, save_msg = self._save_unified_account(account)
+            if save_success:
+                console.print(f"\n[green]✓[/green] Email account '{account.name}' added successfully!")
+            else:
+                console.print(f"\n[yellow]![/yellow] {save_msg}")
         else:
             if not Confirm.ask("Configuration failed. Try again with same settings?", default=True):
                 return
