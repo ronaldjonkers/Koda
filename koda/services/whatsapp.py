@@ -260,6 +260,10 @@ class WhatsAppChannel(BaseChannel):
 /removecalendar <name> - Remove calendar account
 /removelinkedin - Remove LinkedIn account
 
+*Schedules:*
+/schedules - Show all scheduled tasks
+/delschedule <id> - Delete a scheduled task
+
 *Other:*
 /cancel - Cancel active setup"""
 
@@ -370,6 +374,14 @@ Example: `/addbrave BSA1234567890abcdef`"""
             save_config(config)
             return "✅ Brave Search API key saved! Web search is now enabled."
         
+        elif command == "/schedules":
+            return self._list_schedules()
+        
+        elif command == "/delschedule":
+            if not args:
+                return "❌ Usage: `/delschedule <id>`\nUse /schedules to see IDs."
+            return self._delete_schedule(args.strip())
+        
         return None  # Not a recognized command
     
     def _format_accounts(self, config) -> str:
@@ -419,6 +431,109 @@ Example: `/addbrave BSA1234567890abcdef`"""
         
         lines.append("\n_Use /addmail, /addcalendar, /addlinkedin, /addbrave_")
         return "\n".join(lines)
+    
+    def _list_schedules(self) -> str:
+        """List all scheduled tasks."""
+        import json
+        from koda.cli.commands import get_data_dir
+        from datetime import datetime
+        
+        cron_path = get_data_dir() / "cron" / "jobs.json"
+        
+        if not cron_path.exists():
+            return "📅 *Scheduled Tasks:*\n\nNo scheduled tasks yet."
+        
+        try:
+            data = json.loads(cron_path.read_text())
+            jobs = data.get("jobs", [])
+            
+            if not jobs:
+                return "📅 *Scheduled Tasks:*\n\nNo scheduled tasks yet."
+            
+            lines = ["📅 *Scheduled Tasks:*\n"]
+            
+            for job in jobs:
+                job_id = job.get("id", "?")
+                name = job.get("name", "Unnamed")
+                enabled = "✅" if job.get("enabled", True) else "⏸️"
+                schedule = job.get("schedule", {})
+                
+                # Format schedule
+                kind = schedule.get("kind", "?")
+                if kind == "cron":
+                    sched_str = f"cron: `{schedule.get('expr', '?')}`"
+                elif kind == "every":
+                    every_ms = schedule.get("everyMs", 0)
+                    if every_ms:
+                        hours = every_ms // 3600000
+                        mins = (every_ms % 3600000) // 60000
+                        if hours:
+                            sched_str = f"every {hours}h{mins}m" if mins else f"every {hours}h"
+                        else:
+                            sched_str = f"every {mins}m"
+                    else:
+                        sched_str = "every ?"
+                elif kind == "at":
+                    at_ms = schedule.get("atMs", 0)
+                    if at_ms:
+                        dt = datetime.fromtimestamp(at_ms / 1000)
+                        sched_str = f"at {dt.strftime('%Y-%m-%d %H:%M')}"
+                    else:
+                        sched_str = "at ?"
+                else:
+                    sched_str = kind
+                
+                # Next run
+                state = job.get("state", {})
+                next_run_ms = state.get("nextRunAtMs")
+                if next_run_ms:
+                    next_dt = datetime.fromtimestamp(next_run_ms / 1000)
+                    next_str = next_dt.strftime("%d/%m %H:%M")
+                else:
+                    next_str = "-"
+                
+                lines.append(f"{enabled} *{name}* (`{job_id}`)")
+                lines.append(f"   {sched_str}")
+                lines.append(f"   Next: {next_str}")
+                lines.append("")
+            
+            lines.append("_Use `/delschedule <id>` to delete_")
+            return "\n".join(lines)
+            
+        except Exception as e:
+            logger.error(f"Error listing schedules: {e}")
+            return f"❌ Error loading schedules: {e}"
+    
+    def _delete_schedule(self, job_id: str) -> str:
+        """Delete a scheduled task by ID."""
+        import json
+        from koda.cli.commands import get_data_dir
+        
+        cron_path = get_data_dir() / "cron" / "jobs.json"
+        
+        if not cron_path.exists():
+            return "❌ No schedules found."
+        
+        try:
+            data = json.loads(cron_path.read_text())
+            jobs = data.get("jobs", [])
+            
+            # Find and remove job
+            original_count = len(jobs)
+            jobs = [j for j in jobs if j.get("id") != job_id]
+            
+            if len(jobs) == original_count:
+                return f"❌ Schedule `{job_id}` not found.\nUse /schedules to see IDs."
+            
+            # Save back
+            data["jobs"] = jobs
+            cron_path.write_text(json.dumps(data, indent=2))
+            
+            return f"✅ Schedule `{job_id}` deleted."
+            
+        except Exception as e:
+            logger.error(f"Error deleting schedule: {e}")
+            return f"❌ Error deleting schedule: {e}"
     
     def _start_linkedin_setup(self, phone: str) -> str:
         """Start step-by-step LinkedIn setup."""
