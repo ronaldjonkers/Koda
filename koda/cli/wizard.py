@@ -126,9 +126,11 @@ class SetupWizard:
         console.print("[dim]How Koda should address you in conversations and messages.[/dim]")
         user_name = Prompt.ask(
             "Your name",
-            default=current_user if current_user else "there"
+            default=current_user
         )
-        self.config.assistant.user_name = user_name
+        if not user_name.strip():
+            console.print("[yellow]![/yellow] No name provided - Koda will use generic greetings.")
+        self.config.assistant.user_name = user_name.strip()
         
         # Language
         console.print("\n[bold]Language[/bold]")
@@ -1549,16 +1551,9 @@ class SetupWizard:
         console.print("[bold]Two modes available:[/bold]")
         console.print("  [cyan]Bot Mode[/cyan]      - Koda responds to everyone (like a business assistant)")
         console.print("  [cyan]Restricted[/cyan]    - Koda only responds to specific phone numbers\n")
-        console.print("[yellow]Note:[/yellow] Run [cyan]koda channels login[/cyan] after setup to link WhatsApp.\n")
+        console.print("[dim]QR code login starts automatically when you run 'koda gateway'.[/dim]\n")
         
         self.config.channels.whatsapp.enabled = True
-        
-        # Bridge URL
-        bridge_url = Prompt.ask(
-            "Bridge URL",
-            default=self.config.channels.whatsapp.bridge_url
-        )
-        self.config.channels.whatsapp.bridge_url = bridge_url
         
         # Bot mode vs restricted mode
         console.print("\n[bold]Access Mode:[/bold]")

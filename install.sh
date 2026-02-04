@@ -367,8 +367,8 @@ main() {
     echo -e "     ${YELLOW}koda onboard${NC}\n"
     echo -e "  ${GREEN}3.${NC} Start chatting:"
     echo -e "     ${YELLOW}koda agent -m \"Hello!\"${NC}\n"
-    echo -e "For WhatsApp, link your device with:"
-    echo -e "     ${YELLOW}koda channels login${NC}\n"
+    echo -e "  ${GREEN}4.${NC} For WhatsApp, start the gateway (QR login starts automatically):"
+    echo -e "     ${YELLOW}koda gateway${NC}\n"
     echo -e "Documentation: ${BLUE}https://github.com/ronaldjonkers/Koda${NC}"
 }
 

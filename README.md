@@ -210,10 +210,11 @@ koda cron run <id>       # Manually run a job
 
 ```bash
 koda channels status     # Show channel connection status
-koda channels login      # Link WhatsApp via QR code
 ```
 
 ### Gateway Options
+
+WhatsApp QR code login starts automatically when you run `koda gateway`.
 
 ```bash
 koda gateway                    # Start with defaults
@@ -934,9 +935,8 @@ Supported languages:
 | `koda config --test` | Test all connections |
 | `koda agent -m "..."` | Chat with assistant |
 | `koda agent` | Interactive chat mode |
-| `koda gateway` | Start messaging gateway |
+| `koda gateway` | Start messaging gateway (WhatsApp QR login included) |
 | `koda status` | Show status |
-| `koda channels login` | Link WhatsApp |
 | `koda cron add` | Add scheduled task |
 | `koda cron list` | List scheduled tasks |
 | `koda setup-proxy` | Generate reverse proxy config for external access |

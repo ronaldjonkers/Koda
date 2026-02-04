@@ -68,3 +68,6 @@ workspace/
 # Distribution
 *.tar.gz
 *.zip
+
+# Temporary reference projects
+openclaw-main/
