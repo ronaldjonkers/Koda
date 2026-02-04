@@ -230,14 +230,79 @@ class CalDAVClient:
             logger.error(f"Failed to create event: {e}")
             return None
     
-    def delete_event(self, uid: str) -> bool:
-        """Delete an event by UID."""
+    def update_event(
+        self,
+        event_uid: str,
+        summary: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        description: str | None = None,
+        location: str | None = None
+    ) -> bool:
+        """
+        Update an existing calendar event.
+        
+        Args:
+            event_uid: The event UID to update
+            summary: New summary/title (optional)
+            start: New start time (optional)
+            end: New end time (optional)
+            description: New description (optional)
+            location: New location (optional)
+        
+        Returns:
+            True if successful
+        """
         if not self._calendar:
             if not self.connect():
                 return False
         
         try:
-            event = self._calendar.event_by_uid(uid)
+            event = self._calendar.event_by_uid(event_uid)
+            ical = event.icalendar_component
+            
+            # Update fields in the iCalendar component
+            if summary is not None:
+                ical['summary'] = summary
+            if start is not None:
+                ical['dtstart'].dt = start
+            if end is not None:
+                ical['dtend'].dt = end
+            if description is not None:
+                if 'description' in ical:
+                    ical['description'] = description
+                else:
+                    from icalendar import vText
+                    ical.add('description', description)
+            if location is not None:
+                if 'location' in ical:
+                    ical['location'] = location
+                else:
+                    from icalendar import vText
+                    ical.add('location', location)
+            
+            # Save the updated event
+            event.save()
+            logger.info(f"Updated CalDAV event: {event_uid}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update event: {e}")
+            return False
+    
+    def delete_event(self, event_uid: str = None, uid: str = None) -> bool:
+        """Delete an event by UID."""
+        # Support both parameter names for compatibility
+        event_id = event_uid or uid
+        if not event_id:
+            return False
+            
+        if not self._calendar:
+            if not self.connect():
+                return False
+        
+        try:
+            event = self._calendar.event_by_uid(event_id)
             event.delete()
             return True
         except Exception as e:

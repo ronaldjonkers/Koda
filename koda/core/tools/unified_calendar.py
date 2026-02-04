@@ -36,7 +36,23 @@ Actions:
 - list: List upcoming events from all calendars
 - today: Get today's events from all calendars  
 - create: Create a new event (will prompt for calendar name, reminder, and meet link)
+- update: Update an existing event (change time, location, description, add Meet link)
+- delete: Delete an event
 - calendars: List all available calendars with their names
+
+Parameters for 'update':
+- event_id: Event ID to update (required)
+- calendar: Calendar NAME where the event is located
+- summary: New event title
+- start: New start datetime ISO format
+- end: New end datetime ISO format
+- location: New location
+- description: New description
+- add_meet_link: Add Google Meet link (Google only)
+
+Parameters for 'delete':
+- event_id: Event ID to delete (required)
+- calendar: Calendar NAME where the event is located
 
 Parameters for 'create':
 - summary: Event title (required)
@@ -56,8 +72,12 @@ Parameters for 'create':
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "today", "create", "calendars"],
+                "enum": ["list", "today", "create", "update", "delete", "calendars"],
                 "description": "Action to perform"
+            },
+            "event_id": {
+                "type": "string",
+                "description": "Event ID for update/delete actions"
             },
             "days": {
                 "type": "integer",
@@ -260,6 +280,12 @@ Parameters for 'create':
             
             elif action == "create":
                 return await self._create_event(**kwargs)
+            
+            elif action == "update":
+                return await self._update_event(**kwargs)
+            
+            elif action == "delete":
+                return await self._delete_event(**kwargs)
             
             else:
                 return f"Unknown action: {action}"
@@ -567,3 +593,151 @@ _Technische fout is gelogd op de server._"""
             output.append(f"\n⏰ WhatsApp reminder set for {whatsapp_reminder} minutes before")
         
         return "\n".join(output)
+    
+    async def _update_event(self, **kwargs) -> str:
+        """Update an existing calendar event."""
+        event_id = kwargs.get("event_id")
+        calendar_name = kwargs.get("calendar")
+        
+        if not event_id:
+            return "Error: event_id is required. Use 'list' action to find event IDs."
+        
+        # Get calendar account
+        account_names = self._get_account_names()
+        if not account_names:
+            return "Error: No calendar accounts configured."
+        
+        if not calendar_name:
+            if len(account_names) == 1:
+                calendar_name = account_names[0]
+            else:
+                return f"Error: Multiple calendars available. Specify which one: {', '.join(account_names)}"
+        
+        account = self._get_account_by_name(calendar_name)
+        if not account:
+            return f"Error: Calendar '{calendar_name}' not found."
+        
+        account_type = account.get("type", "")
+        
+        try:
+            client = self._get_client_for_account(account)
+            if not client:
+                return f"Error: Could not connect to calendar '{calendar_name}'"
+            
+            # Parse optional datetime updates
+            start = None
+            end = None
+            if kwargs.get("start"):
+                try:
+                    start = datetime.fromisoformat(kwargs["start"])
+                except ValueError:
+                    return "Error: Invalid start datetime format"
+            if kwargs.get("end"):
+                try:
+                    end = datetime.fromisoformat(kwargs["end"])
+                except ValueError:
+                    return "Error: Invalid end datetime format"
+            
+            if account_type == "google":
+                result = client.update_event(
+                    event_id=event_id,
+                    calendar_id="primary",
+                    summary=kwargs.get("summary"),
+                    start=start,
+                    end=end,
+                    description=kwargs.get("description"),
+                    location=kwargs.get("location"),
+                    add_meet_link=kwargs.get("add_meet_link", False)
+                )
+                if result:
+                    meet_info = f"\n🔗 Meet: {result.meet_link}" if result.meet_link else ""
+                    return f"✅ **Event updated:** {result.summary}{meet_info}"
+                return "❌ Failed to update event"
+            
+            elif account_type == "exchange":
+                result = client.update_calendar_event(
+                    event_id=event_id,
+                    subject=kwargs.get("summary"),
+                    start=start,
+                    end=end,
+                    body=kwargs.get("description"),
+                    location=kwargs.get("location")
+                )
+                if result:
+                    return f"✅ **Event updated**"
+                return "❌ Failed to update event"
+            
+            elif account_type == "caldav":
+                result = client.update_event(
+                    event_uid=event_id,
+                    summary=kwargs.get("summary"),
+                    start=start,
+                    end=end,
+                    description=kwargs.get("description"),
+                    location=kwargs.get("location")
+                )
+                if result:
+                    return f"✅ **Event updated**"
+                return "❌ Failed to update event"
+            
+            else:
+                return f"Error: Update not supported for calendar type '{account_type}'"
+        
+        except Exception as e:
+            logger.error(f"Failed to update event: {e}")
+            return f"❌ Error updating event: {e}"
+    
+    async def _delete_event(self, **kwargs) -> str:
+        """Delete a calendar event."""
+        event_id = kwargs.get("event_id")
+        calendar_name = kwargs.get("calendar")
+        
+        if not event_id:
+            return "Error: event_id is required. Use 'list' action to find event IDs."
+        
+        # Get calendar account
+        account_names = self._get_account_names()
+        if not account_names:
+            return "Error: No calendar accounts configured."
+        
+        if not calendar_name:
+            if len(account_names) == 1:
+                calendar_name = account_names[0]
+            else:
+                return f"Error: Multiple calendars available. Specify which one: {', '.join(account_names)}"
+        
+        account = self._get_account_by_name(calendar_name)
+        if not account:
+            return f"Error: Calendar '{calendar_name}' not found."
+        
+        account_type = account.get("type", "")
+        
+        try:
+            client = self._get_client_for_account(account)
+            if not client:
+                return f"Error: Could not connect to calendar '{calendar_name}'"
+            
+            if account_type == "google":
+                result = client.delete_event(event_id=event_id, calendar_id="primary")
+                if result:
+                    return "✅ **Event deleted**"
+                return "❌ Failed to delete event"
+            
+            elif account_type == "exchange":
+                result = client.delete_calendar_event(event_id=event_id)
+                if result:
+                    return "✅ **Event deleted**"
+                return "❌ Failed to delete event"
+            
+            elif account_type == "caldav":
+                result = client.delete_event(event_uid=event_id)
+                if result:
+                    return "✅ **Event deleted**"
+                return "❌ Failed to delete event"
+            
+            else:
+                return f"Error: Delete not supported for calendar type '{account_type}'"
+        
+        except Exception as e:
+            logger.error(f"Failed to delete event: {e}")
+            return f"❌ Error deleting event: {e}"

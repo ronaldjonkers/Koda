@@ -287,6 +287,90 @@ class ExchangeClient:
             "end": end.isoformat(),
         }
     
+    def update_calendar_event(
+        self,
+        event_id: str,
+        subject: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        body: str | None = None,
+        location: str | None = None
+    ) -> bool:
+        """
+        Update an existing calendar event.
+        
+        Args:
+            event_id: The event ID to update
+            subject: New subject (optional)
+            start: New start time (optional)
+            end: New end time (optional)
+            body: New body/description (optional)
+            location: New location (optional)
+        
+        Returns:
+            True if successful
+        """
+        from exchangelib import EWSDateTime, EWSTimeZone
+        
+        account = self._get_account()
+        tz = EWSTimeZone.localzone()
+        
+        # Find the event by ID
+        try:
+            events = list(account.calendar.filter(id=event_id))
+            if not events:
+                logger.error(f"Event not found: {event_id}")
+                return False
+            
+            event = events[0]
+            
+            # Update fields
+            if subject is not None:
+                event.subject = subject
+            if start is not None:
+                event.start = EWSDateTime.from_datetime(start.replace(tzinfo=tz))
+            if end is not None:
+                event.end = EWSDateTime.from_datetime(end.replace(tzinfo=tz))
+            if body is not None:
+                event.body = body
+            if location is not None:
+                event.location = location
+            
+            event.save()
+            logger.info(f"Updated Exchange event: {event_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update Exchange event: {e}")
+            return False
+    
+    def delete_calendar_event(self, event_id: str) -> bool:
+        """
+        Delete a calendar event.
+        
+        Args:
+            event_id: The event ID to delete
+        
+        Returns:
+            True if successful
+        """
+        account = self._get_account()
+        
+        try:
+            events = list(account.calendar.filter(id=event_id))
+            if not events:
+                logger.error(f"Event not found: {event_id}")
+                return False
+            
+            event = events[0]
+            event.delete()
+            logger.info(f"Deleted Exchange event: {event_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete Exchange event: {e}")
+            return False
+    
     def list_emails(
         self,
         folder: str = "inbox",
