@@ -137,10 +137,21 @@ class WhatsAppChannel(BaseChannel):
         
         return self._contact_rules.get(normalized)
     
-    def _should_escalate(self, content: str, contact_rule: WhatsAppContactRule | None) -> bool:
+    def _should_escalate(self, content: str, contact_rule: WhatsAppContactRule | None, sender_phone: str = "") -> bool:
         """Check if a message should be escalated to the owner."""
         if not self.config.escalate_to_owner:
             return False
+        
+        # Never escalate self-messages (from owner or bot phone)
+        normalized_sender = sender_phone.replace('+', '').lstrip('0')
+        if self.config.owner_phone:
+            normalized_owner = self.config.owner_phone.replace('+', '').lstrip('0')
+            if normalized_sender == normalized_owner:
+                return False
+        if self.config.bot_phone:
+            normalized_bot = self.config.bot_phone.replace('+', '').lstrip('0')
+            if normalized_sender == normalized_bot:
+                return False
         
         content_lower = content.lower()
         
@@ -166,11 +177,11 @@ class WhatsAppChannel(BaseChannel):
         owner_jid = f"{self.config.owner_phone.replace('+', '')}@s.whatsapp.net"
         
         notification = (
-            f"📢 *Bericht dat je aandacht nodig heeft*\n\n"
-            f"Van: {sender_name or sender_phone}\n"
-            f"Nummer: {sender_phone}\n\n"
-            f"Bericht:\n{message}\n\n"
-            f"_Reageer direct op dit nummer als actie nodig is._"
+            f"📢 *Message that needs your attention*\n\n"
+            f"From: {sender_name or sender_phone}\n"
+            f"Number: {sender_phone}\n\n"
+            f"Message:\n{message}\n\n"
+            f"_Reply directly to this number if action is needed._"
         )
         
         await self.send(OutboundMessage(
@@ -225,95 +236,95 @@ class WhatsAppChannel(BaseChannel):
         config = load_config()
         
         if command == "/help":
-            return """📋 *Beschikbare commando's:*
+            return """📋 *Available commands:*
 
-*Informatie:*
-/help - Toon deze hulp
-/status - Toon huidige instellingen
-/accounts - Toon mail/agenda accounts
+*Information:*
+/help - Show this help
+/status - Show current settings
+/accounts - Show mail/calendar accounts
 
-*Basis instellingen:*
-/name <naam> - Stel je naam in
-/assistant <naam> - Stel assistant naam in
-/language <code> - Stel taal in (nl, en, de, fr, es)
-/style <stijl> - Stel stijl in (professional, friendly, formal)
+*Basic settings:*
+/name <name> - Set your name
+/assistant <name> - Set assistant name
+/language <code> - Set language (nl, en, de, fr, es)
+/style <style> - Set style (professional, friendly, formal)
 
-*Accounts toevoegen:*
-/addmail - Voeg email account toe (stap voor stap)
-/addmail json - Voeg email toe via JSON
-/addcalendar - Voeg agenda account toe (stap voor stap)
-/addcalendar json - Voeg agenda toe via JSON
+*Add accounts:*
+/addmail - Add email account (step by step)
+/addmail json - Add email via JSON
+/addcalendar - Add calendar account (step by step)
+/addcalendar json - Add calendar via JSON
 
-*Accounts verwijderen:*
-/removemail <naam> - Verwijder email account
-/removecalendar <naam> - Verwijder agenda account
+*Remove accounts:*
+/removemail <name> - Remove email account
+/removecalendar <name> - Remove calendar account
 
-*Overig:*
-/cancel - Annuleer lopende setup"""
+*Other:*
+/cancel - Cancel active setup"""
 
         elif command == "/status":
             assistant = config.assistant
             wa = config.channels.whatsapp
-            mode = "Bot Mode (iedereen)" if wa.bot_mode else "Restricted Mode"
-            allowed = ", ".join(wa.allow_from) if wa.allow_from else "niemand"
+            mode = "Bot Mode (everyone)" if wa.bot_mode else "Restricted Mode"
+            allowed = ", ".join(wa.allow_from) if wa.allow_from else "nobody"
             
             # Count accounts
             email_count = len(config.integrations.email_accounts) if hasattr(config.integrations, 'email_accounts') else 0
             cal_count = len(config.integrations.calendar_accounts) if hasattr(config.integrations, 'calendar_accounts') else 0
             
-            return f"""⚙️ *Huidige instellingen:*
+            return f"""⚙️ *Current settings:*
 
 *Assistant:*
-• Naam: {assistant.name}
-• Jouw naam: {assistant.user_name or '(niet ingesteld)'}
-• Taal: {assistant.language}
-• Stijl: {assistant.personality}
+• Name: {assistant.name}
+• Your name: {assistant.user_name or '(not set)'}
+• Language: {assistant.language}
+• Style: {assistant.personality}
 
 *WhatsApp:*
-• Modus: {mode}
-• Toegestaan: {allowed}
+• Mode: {mode}
+• Allowed: {allowed}
 
 *Accounts:*
 • Email accounts: {email_count}
-• Agenda accounts: {cal_count}
+• Calendar accounts: {cal_count}
 
 *Model:* {config.agents.defaults.model}
 
-_Gebruik /accounts voor details_"""
+_Use /accounts for details_"""
 
         elif command == "/accounts":
             return self._format_accounts(config)
         
         elif command == "/name":
             if not args:
-                return "❌ Gebruik: `/name <jouw naam>`\nVoorbeeld: `/name Ronald`"
+                return "❌ Usage: `/name <your name>`\nExample: `/name Ronald`"
             config.assistant.user_name = args
             save_config(config)
-            return f"✅ Je naam is ingesteld op: *{args}*"
+            return f"✅ Your name has been set to: *{args}*"
         
         elif command == "/assistant":
             if not args:
-                return "❌ Gebruik: `/assistant <naam>`\nVoorbeeld: `/assistant Joyce`"
+                return "❌ Usage: `/assistant <name>`\nExample: `/assistant Joyce`"
             config.assistant.name = args
             save_config(config)
-            return f"✅ Assistant naam is ingesteld op: *{args}*"
+            return f"✅ Assistant name has been set to: *{args}*"
         
         elif command == "/language":
             valid_langs = ["nl", "en", "de", "fr", "es"]
             if not args or args.lower() not in valid_langs:
-                return f"❌ Gebruik: `/language <code>`\nGeldige codes: {', '.join(valid_langs)}"
+                return f"❌ Usage: `/language <code>`\nValid codes: {', '.join(valid_langs)}"
             config.assistant.language = args.lower()
             save_config(config)
             lang_names = {"nl": "Nederlands", "en": "English", "de": "Deutsch", "fr": "Français", "es": "Español"}
-            return f"✅ Taal ingesteld op: *{lang_names.get(args.lower(), args)}*"
+            return f"✅ Language set to: *{lang_names.get(args.lower(), args)}*"
         
         elif command == "/style":
             valid_styles = ["professional", "friendly", "formal"]
             if not args or args.lower() not in valid_styles:
-                return f"❌ Gebruik: `/style <stijl>`\nGeldige stijlen: {', '.join(valid_styles)}"
+                return f"❌ Usage: `/style <style>`\nValid styles: {', '.join(valid_styles)}"
             config.assistant.personality = args.lower()
             save_config(config)
-            return f"✅ Stijl ingesteld op: *{args.lower()}*"
+            return f"✅ Style set to: *{args.lower()}*"
         
         elif command == "/addmail":
             if args.lower() == "json":
@@ -327,25 +338,25 @@ _Gebruik /accounts voor details_"""
         
         elif command == "/removemail":
             if not args:
-                return "❌ Gebruik: `/removemail <naam>`\nGebruik /accounts om namen te zien."
+                return "❌ Usage: `/removemail <name>`\nUse /accounts to see names."
             return self._remove_account(config, "email", args)
         
         elif command == "/removecalendar":
             if not args:
-                return "❌ Gebruik: `/removecalendar <naam>`\nGebruik /accounts om namen te zien."
+                return "❌ Usage: `/removecalendar <name>`\nUse /accounts to see names."
             return self._remove_account(config, "calendar", args)
         
         elif command == "/cancel":
             if phone in self._setup_sessions:
                 del self._setup_sessions[phone]
-                return "✅ Setup geannuleerd."
-            return "ℹ️ Geen actieve setup om te annuleren."
+                return "✅ Setup cancelled."
+            return "ℹ️ No active setup to cancel."
         
         return None  # Not a recognized command
     
     def _format_accounts(self, config) -> str:
         """Format configured accounts for display."""
-        lines = ["📧 *Geconfigureerde Accounts:*\n"]
+        lines = ["📧 *Configured Accounts:*\n"]
         
         # Email accounts
         email_accounts = getattr(config.integrations, 'email_accounts', []) or []
@@ -357,14 +368,14 @@ _Gebruik /accounts voor details_"""
                 email = acc.get('email', acc.get('username', ''))
                 lines.append(f"• {name} ({acc_type}): {email}")
         else:
-            lines.append("*Email:* Geen accounts geconfigureerd")
+            lines.append("*Email:* No accounts configured")
         
         lines.append("")
         
         # Calendar accounts
         cal_accounts = getattr(config.integrations, 'calendar_accounts', []) or []
         if cal_accounts:
-            lines.append("*Agenda:*")
+            lines.append("*Calendar:*")
             for acc in cal_accounts:
                 name = acc.get('name', 'unnamed')
                 acc_type = acc.get('type', 'unknown')
@@ -380,12 +391,12 @@ _Gebruik /accounts voor details_"""
                 legacy.append(f"• CalDAV: {config.integrations.caldav.url}")
             
             if legacy:
-                lines.append("*Agenda:*")
+                lines.append("*Calendar:*")
                 lines.extend(legacy)
             else:
-                lines.append("*Agenda:* Geen accounts geconfigureerd")
+                lines.append("*Calendar:* No accounts configured")
         
-        lines.append("\n_Gebruik /addmail of /addcalendar om toe te voegen_")
+        lines.append("\n_Use /addmail or /addcalendar to add accounts_")
         return "\n".join(lines)
     
     async def _auto_reload_config(self) -> None:
@@ -416,11 +427,11 @@ _Gebruik /accounts voor details_"""
         }
         return """📧 *Email Account Setup*
 
-Stap 1/5: Welk type email?
+Step 1/5: What type of email?
 1️⃣ Exchange/Office 365
 2️⃣ IMAP (Gmail, etc.)
 
-Stuur het nummer (1 of 2) of /cancel om te stoppen."""
+Send the number (1 or 2) or /cancel to stop."""
     
     def _start_calendar_setup(self, phone: str) -> str:
         """Start step-by-step calendar setup."""
@@ -429,14 +440,14 @@ Stuur het nummer (1 of 2) of /cancel om te stoppen."""
             "step": 1,
             "data": {}
         }
-        return """📅 *Agenda Account Setup*
+        return """📅 *Calendar Account Setup*
 
-Stap 1/4: Welk type agenda?
+Step 1/4: What type of calendar?
 1️⃣ Exchange/Office 365
 2️⃣ Google Calendar
 3️⃣ CalDAV (iCloud, Nextcloud, etc.)
 
-Stuur het nummer (1, 2 of 3) of /cancel om te stoppen."""
+Send the number (1, 2 or 3) or /cancel to stop."""
     
     def _start_json_setup(self, phone: str, account_type: str) -> str:
         """Start JSON-based setup."""
@@ -449,15 +460,15 @@ Stuur het nummer (1, 2 of 3) of /cancel om te stoppen."""
         if account_type == "email":
             return """📧 *Email Account Setup (JSON)*
 
-Stuur een JSON object met de volgende velden:
+Send a JSON object with the following fields:
 
 *Exchange:*
 ```
 {
   "type": "exchange",
-  "name": "Werk",
-  "email": "je@bedrijf.com",
-  "password": "wachtwoord",
+  "name": "Work",
+  "email": "you@company.com",
+  "password": "password",
   "server": "outlook.office365.com"
 }
 ```
@@ -469,24 +480,24 @@ Stuur een JSON object met de volgende velden:
   "name": "Gmail",
   "host": "imap.gmail.com",
   "port": 993,
-  "username": "je@gmail.com",
-  "password": "app-wachtwoord"
+  "username": "you@gmail.com",
+  "password": "app-password"
 }
 ```
 
-Of /cancel om te stoppen."""
+Or /cancel to stop."""
         else:
-            return """📅 *Agenda Account Setup (JSON)*
+            return """📅 *Calendar Account Setup (JSON)*
 
-Stuur een JSON object met de volgende velden:
+Send a JSON object with the following fields:
 
 *Exchange:*
 ```
 {
   "type": "exchange",
-  "name": "Werk",
-  "email": "je@bedrijf.com",
-  "password": "wachtwoord",
+  "name": "Work",
+  "email": "you@company.com",
+  "password": "password",
   "server": "outlook.office365.com"
 }
 ```
@@ -497,12 +508,12 @@ Stuur een JSON object met de volgende velden:
   "type": "caldav",
   "name": "iCloud",
   "url": "https://caldav.icloud.com",
-  "username": "je@icloud.com",
-  "password": "app-wachtwoord"
+  "username": "you@icloud.com",
+  "password": "app-password"
 }
 ```
 
-Of /cancel om te stoppen."""
+Or /cancel to stop."""
     
     async def _handle_setup_response(self, phone: str, content: str, chat_id: str) -> str | None:
         """Handle a response in an active setup session."""
@@ -523,7 +534,7 @@ Of /cancel om te stoppen."""
                 del self._setup_sessions[phone]
                 return result
             except json.JSONDecodeError:
-                return "❌ Ongeldige JSON. Probeer opnieuw of /cancel."
+                return "❌ Invalid JSON. Try again or /cancel."
         
         # Handle step-by-step email setup
         if setup_type == "email":
@@ -543,52 +554,52 @@ Of /cancel om te stoppen."""
             if content == "1":
                 data["type"] = "exchange"
                 session["step"] = 2
-                return "Stap 1/7: Wat is je email adres?"
+                return "Step 1/7: What is your email address?"
             elif content == "2":
                 data["type"] = "imap"
                 session["step"] = 2
-                return "Stap 1/5: Wat is de IMAP server? (bijv. imap.gmail.com)"
+                return "Step 1/5: What is the IMAP server? (e.g. imap.gmail.com)"
             else:
-                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+                return "❌ Choose 1 or 2, or /cancel to stop."
         
         # EXCHANGE EMAIL FLOW
         elif step == 2 and data["type"] == "exchange":
             data["email"] = content
             session["step"] = 3
-            return f"Stap 2/7: Wat is je gebruikersnaam?\n(Vaak hetzelfde als email, of DOMAIN\\\\username)\nStuur 'same' om {content} te gebruiken."
+            return f"Step 2/7: What is your username?\n(Often the same as email, or DOMAIN\\\\username)\nSend 'same' to use {content}."
         
         elif step == 3 and data["type"] == "exchange":
             data["username"] = data["email"] if content.lower() == "same" else content
             session["step"] = 4
-            return "Stap 3/7: Wat is je wachtwoord? (of app-wachtwoord)"
+            return "Step 3/7: What is your password? (or app password)"
         
         elif step == 4 and data["type"] == "exchange":
             data["password"] = content
             session["step"] = 5
-            return """Stap 4/7: Wil je autodiscover gebruiken?
+            return """Step 4/7: Do you want to use autodiscover?
 
-1️⃣ Ja, gebruik autodiscover (aanbevolen voor O365)
-2️⃣ Nee, ik voer de server handmatig in
+1️⃣ Yes, use autodiscover (recommended for O365)
+2️⃣ No, I'll enter the server manually
 
-Stuur 1 of 2:"""
+Send 1 or 2:"""
         
         elif step == 5 and data["type"] == "exchange":
             if content == "1":
                 data["use_autodiscover"] = True
                 data["server"] = ""
                 session["step"] = 7  # Skip server input
-                return "Stap 5/7: Geef dit account een naam (bijv. 'Werk'):"
+                return "Step 5/7: Give this account a name (e.g. 'Work'):"
             elif content == "2":
                 data["use_autodiscover"] = False
                 session["step"] = 6
-                return "Stap 5/7: Wat is de Exchange server?\n(bijv. outlook.office365.com of mail.bedrijf.nl)"
+                return "Step 5/7: What is the Exchange server?\n(e.g. outlook.office365.com or mail.company.com)"
             else:
-                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+                return "❌ Choose 1 or 2, or /cancel to stop."
         
         elif step == 6 and data["type"] == "exchange":
             data["server"] = content
             session["step"] = 7
-            return "Stap 6/7: Geef dit account een naam (bijv. 'Werk'):"
+            return "Step 6/7: Give this account a name (e.g. 'Work'):"
         
         elif step == 7 and data["type"] == "exchange":
             data["name"] = content
@@ -615,17 +626,17 @@ Stuur 1 of 2:"""
         elif step == 2 and data["type"] == "imap":
             data["host"] = content
             session["step"] = 3
-            return "Stap 2/5: Wat is je gebruikersnaam/email?"
+            return "Step 2/5: What is your username/email?"
         
         elif step == 3 and data["type"] == "imap":
             data["username"] = content
             session["step"] = 4
-            return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
+            return "Step 3/5: What is your password? (or app password)"
         
         elif step == 4 and data["type"] == "imap":
             data["password"] = content
             session["step"] = 5
-            return "Stap 4/5: Geef dit account een naam (bijv. 'Gmail'):"
+            return "Step 4/5: Give this account a name (e.g. 'Gmail'):"
         
         elif step == 5 and data["type"] == "imap":
             data["name"] = content
@@ -645,65 +656,65 @@ Stuur 1 of 2:"""
             if content == "1":
                 data["type"] = "exchange"
                 session["step"] = 2
-                return "Stap 1/7: Wat is je email adres?"
+                return "Step 1/7: What is your email address?"
             elif content == "2":
                 data["type"] = "google"
                 del self._setup_sessions[phone]
                 return """⚠️ *Google Calendar Setup*
 
-Google Calendar vereist OAuth authenticatie via de browser.
+Google Calendar requires OAuth authentication via browser.
 
-Run dit commando in je terminal:
+Run this command in your terminal:
 `koda setup --section calendar`
 
-Dit opent een browser voor Google login.
+This will open a browser for Google login.
 
-_Setup via WhatsApp niet mogelijk voor Google._"""
+_Setup via WhatsApp not possible for Google._"""
             elif content == "3":
                 data["type"] = "caldav"
                 session["step"] = 2
-                return "Stap 1/5: Wat is de CalDAV URL?\n(bijv. https://caldav.icloud.com)"
+                return "Step 1/5: What is the CalDAV URL?\n(e.g. https://caldav.icloud.com)"
             else:
-                return "❌ Kies 1, 2 of 3, of /cancel om te stoppen."
+                return "❌ Choose 1, 2 or 3, or /cancel to stop."
         
         # EXCHANGE CALENDAR FLOW
         elif step == 2 and data["type"] == "exchange":
             data["email"] = content
             session["step"] = 3
-            return f"Stap 2/7: Wat is je gebruikersnaam?\n(Vaak hetzelfde als email, of DOMAIN\\\\username)\nStuur 'same' om {content} te gebruiken."
+            return f"Step 2/7: What is your username?\n(Often the same as email, or DOMAIN\\\\username)\nSend 'same' to use {content}."
         
         elif step == 3 and data["type"] == "exchange":
             data["username"] = data["email"] if content.lower() == "same" else content
             session["step"] = 4
-            return "Stap 3/7: Wat is je wachtwoord? (of app-wachtwoord)"
+            return "Step 3/7: What is your password? (or app password)"
         
         elif step == 4 and data["type"] == "exchange":
             data["password"] = content
             session["step"] = 5
-            return """Stap 4/7: Wil je autodiscover gebruiken?
+            return """Step 4/7: Do you want to use autodiscover?
 
-1️⃣ Ja, gebruik autodiscover (aanbevolen voor O365)
-2️⃣ Nee, ik voer de server handmatig in
+1️⃣ Yes, use autodiscover (recommended for O365)
+2️⃣ No, I'll enter the server manually
 
-Stuur 1 of 2:"""
+Send 1 or 2:"""
         
         elif step == 5 and data["type"] == "exchange":
             if content == "1":
                 data["use_autodiscover"] = True
                 data["server"] = ""
                 session["step"] = 7
-                return "Stap 5/7: Geef dit account een naam (bijv. 'Werk'):"
+                return "Step 5/7: Give this account a name (e.g. 'Work'):"
             elif content == "2":
                 data["use_autodiscover"] = False
                 session["step"] = 6
-                return "Stap 5/7: Wat is de Exchange server?\n(bijv. outlook.office365.com of mail.bedrijf.nl)"
+                return "Step 5/7: What is the Exchange server?\n(e.g. outlook.office365.com or mail.company.com)"
             else:
-                return "❌ Kies 1 of 2, of /cancel om te stoppen."
+                return "❌ Choose 1 or 2, or /cancel to stop."
         
         elif step == 6 and data["type"] == "exchange":
             data["server"] = content
             session["step"] = 7
-            return "Stap 6/7: Geef dit account een naam (bijv. 'Werk'):"
+            return "Step 6/7: Give this account a name (e.g. 'Work'):"
         
         elif step == 7 and data["type"] == "exchange":
             data["name"] = content
@@ -728,17 +739,17 @@ Stuur 1 of 2:"""
         elif step == 2 and data["type"] == "caldav":
             data["url"] = content
             session["step"] = 3
-            return "Stap 2/5: Wat is je gebruikersnaam?"
+            return "Step 2/5: What is your username?"
         
         elif step == 3 and data["type"] == "caldav":
             data["username"] = content
             session["step"] = 4
-            return "Stap 3/5: Wat is je wachtwoord? (of app-wachtwoord)"
+            return "Step 3/5: What is your password? (or app password)"
         
         elif step == 4 and data["type"] == "caldav":
             data["password"] = content
             session["step"] = 5
-            return "Stap 4/5: Geef dit account een naam:"
+            return "Step 4/5: Give this account a name:"
         
         elif step == 5 and data["type"] == "caldav":
             data["name"] = content
@@ -815,27 +826,27 @@ Stuur 1 of 2:"""
             logger.info("Exchange connection successful!")
             session["step"] = 9
             
-            other_type = "agenda" if account_type == "email" else "email"
-            return f"""✅ *Verbinding geslaagd!*
+            other_type = "calendar" if account_type == "email" else "email"
+            return f"""✅ *Connection successful!*
 
 Account: {data['name']}
 Email: {data['email']}
 Server: {data.get('server') or 'autodiscover'}
 
-Wil je dit account ook gebruiken voor *{other_type}*?
-(Ja/Nee)"""
+Do you want to use this account for *{other_type}* as well?
+(Yes/No)"""
         
         except ImportError as e:
             logger.error(f"exchangelib import error: {e}")
             logger.error(traceback.format_exc())
             session["step"] = 8
             session["last_error"] = str(e)
-            return self._format_exchange_error(f"exchangelib niet gevonden: {e}\nRun: pip install exchangelib", data)
+            return self._format_exchange_error(f"exchangelib not found: {e}\nRun: pip install exchangelib", data)
         
         except Exception as e:
             # Catch all exceptions with full traceback
             error_type = type(e).__name__
-            error_msg = str(e) or "(geen details)"
+            error_msg = str(e) or "(no details)"
             full_traceback = traceback.format_exc()
             
             logger.error(f"Exchange error: {error_type}: {error_msg}")
@@ -846,35 +857,35 @@ Wil je dit account ook gebruiken voor *{other_type}*?
             
             # Provide more specific error messages
             if "Unauthorized" in error_type or "401" in str(e):
-                return self._format_exchange_error("Authenticatie mislukt. Controleer email/gebruikersnaam en wachtwoord.", data)
+                return self._format_exchange_error("Authentication failed. Check email/username and password.", data)
             elif "Transport" in error_type or "Connection" in error_type:
-                return self._format_exchange_error(f"Kan geen verbinding maken met server: {error_msg}", data)
+                return self._format_exchange_error(f"Cannot connect to server: {error_msg}", data)
             elif "Autodiscover" in str(e) or "autodiscover" in str(e).lower():
-                return self._format_exchange_error(f"Autodiscover mislukt: {error_msg}\nProbeer handmatig een server in te voeren.", data)
+                return self._format_exchange_error(f"Autodiscover failed: {error_msg}\nTry entering a server manually.", data)
             else:
                 return self._format_exchange_error(f"{error_type}: {error_msg}", data)
     
     def _format_exchange_error(self, error: str, data: dict) -> str:
         """Format Exchange error message with retry options."""
-        return f"""❌ *Verbinding mislukt*
+        return f"""❌ *Connection failed*
 
-Fout: {error}
+Error: {error}
 
-*Huidige instellingen:*
+*Current settings:*
 • Email: {data.get('email', '-')}
-• Gebruikersnaam: {data.get('username', '-')}
+• Username: {data.get('username', '-')}
 • Server: {data.get('server') or 'autodiscover'}
 
-*Wat wil je doen?*
-1️⃣ Email wijzigen
-2️⃣ Gebruikersnaam wijzigen
-3️⃣ Wachtwoord wijzigen
-4️⃣ Server wijzigen
-5️⃣ Autodiscover aan/uit
-6️⃣ Opnieuw proberen
-7️⃣ Stoppen (/cancel)
+*What do you want to do?*
+1️⃣ Change email
+2️⃣ Change username
+3️⃣ Change password
+4️⃣ Change server
+5️⃣ Toggle autodiscover
+6️⃣ Try again
+7️⃣ Stop (/cancel)
 
-Stuur een nummer:"""
+Send a number:"""
     
     async def _handle_exchange_retry(self, phone: str, content: str, data: dict, account_type: str) -> str:
         """Handle retry options after failed Exchange connection."""
@@ -882,32 +893,32 @@ Stuur een nummer:"""
         
         if content == "1":
             session["retry_field"] = "email"
-            return "Voer het nieuwe email adres in:"
+            return "Enter the new email address:"
         elif content == "2":
             session["retry_field"] = "username"
-            return "Voer de nieuwe gebruikersnaam in:"
+            return "Enter the new username:"
         elif content == "3":
             session["retry_field"] = "password"
-            return "Voer het nieuwe wachtwoord in:"
+            return "Enter the new password:"
         elif content == "4":
             session["retry_field"] = "server"
-            return "Voer de nieuwe server in (bijv. outlook.office365.com):"
+            return "Enter the new server (e.g. outlook.office365.com):"
         elif content == "5":
             data["use_autodiscover"] = not data.get("use_autodiscover", False)
-            status = "AAN" if data["use_autodiscover"] else "UIT"
-            return f"Autodiscover staat nu *{status}*. Stuur 6 om opnieuw te proberen."
+            status = "ON" if data["use_autodiscover"] else "OFF"
+            return f"Autodiscover is now *{status}*. Send 6 to try again."
         elif content == "6":
             return await self._test_exchange_connection(phone, data, account_type)
         elif content == "7" or content.lower() == "/cancel":
             del self._setup_sessions[phone]
-            return "✅ Setup geannuleerd."
+            return "✅ Setup cancelled."
         elif "retry_field" in session:
             # User is providing new value for a field
             field = session.pop("retry_field")
             data[field] = content
             return await self._test_exchange_connection(phone, data, account_type)
         else:
-            return "❌ Kies een nummer (1-7):"
+            return "❌ Choose a number (1-7):"
     
     async def _save_exchange_for_both(self, data: dict, primary_type: str) -> str:
         """Save Exchange account for both email and calendar."""
@@ -940,17 +951,17 @@ Stuur een nummer:"""
             # Auto-reload config
             await self._auto_reload_config()
             
-            return f"""✅ *Exchange account toegevoegd!*
+            return f"""✅ *Exchange account added!*
 
-Account *{data['name']}* is geconfigureerd voor:
+Account *{data['name']}* is configured for:
 • 📧 Email
-• 📅 Agenda
+• 📅 Calendar
 
-Het account is direct actief."""
+The account is now active."""
         
         except Exception as e:
             logger.error(f"Error saving Exchange account: {e}")
-            return f"❌ Fout bij opslaan: {e}"
+            return f"❌ Error saving: {e}"
     
     async def _save_account_from_data(self, account_type: str, data: dict) -> str:
         """Save account from setup data."""
@@ -985,11 +996,11 @@ Het account is direct actief."""
             # Auto-reload config
             await self._auto_reload_config()
             
-            return f"✅ {account_type.title()} account *{name}* ({acc_type}) toegevoegd en actief!"
+            return f"✅ {account_type.title()} account *{name}* ({acc_type}) added and active!"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
-            return f"❌ Fout bij opslaan: {e}"
+            return f"❌ Error saving: {e}"
     
     def _save_account_from_json(self, account_type: str, data: dict) -> str:
         """Save account from JSON data."""
@@ -1012,7 +1023,7 @@ Het account is direct actief."""
                 }
                 config.integrations.email_accounts.append(account)
                 save_config(config)
-                return f"✅ Email account *{name}* ({acc_type}) toegevoegd!"
+                return f"✅ Email account *{name}* ({acc_type}) added!"
             
             else:  # calendar
                 # Ensure calendar_accounts list exists
@@ -1027,11 +1038,11 @@ Het account is direct actief."""
                 }
                 config.integrations.calendar_accounts.append(account)
                 save_config(config)
-                return f"✅ Agenda account *{name}* ({acc_type}) toegevoegd!"
+                return f"✅ Calendar account *{name}* ({acc_type}) added!"
         
         except Exception as e:
             logger.error(f"Error saving account: {e}")
-            return f"❌ Fout bij opslaan: {e}"
+            return f"❌ Error saving: {e}"
     
     def _remove_account(self, config, account_type: str, name: str) -> str:
         """Remove an account by name."""
@@ -1040,23 +1051,23 @@ Het account is direct actief."""
                 accounts = getattr(config.integrations, 'email_accounts', []) or []
                 new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
                 if len(new_accounts) == len(accounts):
-                    return f"❌ Email account '{name}' niet gevonden."
+                    return f"❌ Email account '{name}' not found."
                 config.integrations.email_accounts = new_accounts
                 save_config(config)
-                return f"✅ Email account *{name}* verwijderd."
+                return f"✅ Email account *{name}* removed."
             
             else:  # calendar
                 accounts = getattr(config.integrations, 'calendar_accounts', []) or []
                 new_accounts = [a for a in accounts if a.get('name', '').lower() != name.lower()]
                 if len(new_accounts) == len(accounts):
-                    return f"❌ Agenda account '{name}' niet gevonden."
+                    return f"❌ Calendar account '{name}' not found."
                 config.integrations.calendar_accounts = new_accounts
                 save_config(config)
-                return f"✅ Agenda account *{name}* verwijderd."
+                return f"✅ Calendar account *{name}* removed."
         
         except Exception as e:
             logger.error(f"Error removing account: {e}")
-            return f"❌ Fout bij verwijderen: {e}"
+            return f"❌ Error removing: {e}"
     
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -1117,8 +1128,8 @@ Het account is direct actief."""
             contact_rule = self._get_contact_rule(phone)
             contact_name = contact_rule.name if contact_rule else None
             
-            # Check for escalation
-            if self._should_escalate(content, contact_rule):
+            # Check for escalation (skip for self-messages)
+            if self._should_escalate(content, contact_rule, phone):
                 await self._notify_owner(phone, contact_name or phone, content)
             
             # Build metadata with contact info and instructions
