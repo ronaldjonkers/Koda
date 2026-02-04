@@ -108,19 +108,32 @@ export class WhatsAppClient {
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
       console.log(`📨 messages.upsert event: type=${type}, count=${messages.length}`);
       
-      // Process both 'notify' (incoming) and 'append' (self-sent/synced) messages
-      // Self-messages to "Yourself" chat come as 'append' type
-      if (type !== 'notify' && type !== 'append') {
-        console.log(`   Skipping: type is '${type}', not 'notify' or 'append'`);
-        return;
+      // Debug: Log ALL message types to understand what's happening
+      for (const msg of messages) {
+        console.log(`   [DEBUG] Message details:`);
+        console.log(`   - type: ${type}`);
+        console.log(`   - remoteJid: ${msg.key.remoteJid}`);
+        console.log(`   - fromMe: ${msg.key.fromMe}`);
+        console.log(`   - participant: ${msg.key.participant || 'none'}`);
+        console.log(`   - id: ${msg.key.id}`);
+        
+        // Special handling for "Yourself" chat
+        // In WhatsApp, messages to yourself might have your own JID as remoteJid
+        const myJid = this.sock.user?.id;
+        console.log(`   - My JID: ${myJid}`);
+        
+        // Check if this is a self-message
+        const isSelfChat = msg.key.remoteJid === myJid;
+        console.log(`   - Is self-chat: ${isSelfChat}`);
       }
+      
+      // Process all message types - don't filter by type
+      // This ensures we catch all self-messages regardless of type
+      console.log(`   Processing all ${messages.length} messages...`);
 
       for (const msg of messages) {
         const sender = msg.key.remoteJid || 'unknown';
         const fromMe = msg.key.fromMe || false;
-        
-        console.log(`   Message: sender=${sender}, fromMe=${fromMe}, type=${type}`);
-        console.log(`   Full key: ${JSON.stringify(msg.key)}`);
         
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') {
@@ -130,24 +143,28 @@ export class WhatsAppClient {
 
         const content = this.extractMessageContent(msg);
         if (!content) {
-          console.log(`   Skipping: no extractable content`);
+          console.log(`   Skipping: no extractable content for ${sender}`);
           continue;
         }
         
-        console.log(`   Content: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
+        console.log(`   Content from ${sender}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
-
-        // For self-messages (notes to self), the sender is your own number
-        // We forward these so users can test the bot by messaging themselves
+        
+        // Get my own JID for self-message detection
+        const myJid = this.sock.user?.id;
+        const isSelfChat = msg.key.remoteJid === myJid;
+        
+        // For self-messages, we need to forward them with the correct sender
         let messageSender = sender;
         
-        // For self-chat, fromMe is true and remoteJid is your own number
-        if (fromMe) {
-          console.log(`   Note: This is a self-sent message (fromMe=true), forwarding for processing`);
+        if (isSelfChat || (fromMe && !isGroup)) {
+          console.log(`   📱 SELF-MESSAGE DETECTED! remoteJid=${sender}, myJid=${myJid}`);
+          // For self-messages, the sender should be our own number
+          messageSender = myJid || sender;
         }
 
-        console.log(`✅ Forwarding message to Python: ${sender}`);
+        console.log(`✅ Forwarding message to Python: sender=${messageSender}, fromMe=${fromMe}, isSelfChat=${isSelfChat}`);
         
         this.options.onMessage({
           id: msg.key.id || '',
