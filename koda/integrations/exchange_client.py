@@ -400,3 +400,55 @@ class ExchangeClient:
         """Get count of unread emails in inbox."""
         account = self._get_account()
         return account.inbox.filter(is_read=False).count()
+    
+    def search_emails(
+        self,
+        query: str,
+        folder: str = "inbox",
+        max_results: int = 20
+    ) -> list[dict[str, Any]]:
+        """
+        Search emails by subject, sender, or body content.
+        
+        Args:
+            query: Search query string
+            folder: Folder to search (inbox, sent, drafts)
+            max_results: Maximum number of results
+        
+        Returns:
+            List of matching email dictionaries
+        """
+        account = self._get_account()
+        
+        folder_map = {
+            "inbox": account.inbox,
+            "sent": account.sent,
+            "drafts": account.drafts,
+        }
+        
+        target_folder = folder_map.get(folder.lower(), account.inbox)
+        
+        # Search in subject, sender, and body
+        # Using Q objects for OR query
+        from exchangelib import Q
+        
+        query_filter = (
+            Q(subject__icontains=query) |
+            Q(sender__email_address__icontains=query) |
+            Q(body__icontains=query)
+        )
+        
+        emails = target_folder.filter(query_filter).order_by("-datetime_received")[:max_results]
+        
+        return [
+            {
+                "id": str(item.id) if item.id else None,
+                "subject": item.subject,
+                "from": str(item.sender.email_address) if item.sender else None,
+                "to": [str(r.email_address) for r in (item.to_recipients or [])],
+                "date": item.datetime_received.isoformat() if item.datetime_received else None,
+                "is_read": item.is_read,
+                "body_preview": item.body[:300] if item.body else None,
+            }
+            for item in emails
+        ]

@@ -21,6 +21,7 @@ from koda.core.tools.calendar import GoogleCalendarTool, ExchangeCalendarTool
 from koda.core.tools.unified_calendar import UnifiedCalendarTool
 from koda.core.tools.email import GmailTool, ExchangeEmailTool
 from koda.core.tools.unified_email import UnifiedEmailTool
+from koda.core.tools.accounts import AccountsTool
 from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
 from koda.core.tools.script import ScriptTool
@@ -109,9 +110,42 @@ class AgentLoop:
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
         
-        # Unified calendar tool (supports Google, Exchange, CalDAV with Meet links and reminders)
+        # Get full config object for account-based tools
+        full_config = self.calendar_config.get('config') if self.calendar_config else None
         cal_cfg = self.calendar_config
+        
+        # Accounts tool - lets LLM discover available accounts
+        self.tools.register(AccountsTool(config=full_config))
+        
+        # Build calendar accounts list from config
+        calendar_accounts = []
+        if full_config and hasattr(full_config, 'integrations'):
+            # Get calendar_accounts from config (may be dicts or models)
+            raw_accounts = getattr(full_config.integrations, 'calendar_accounts', []) or []
+            for acc in raw_accounts:
+                if isinstance(acc, dict):
+                    calendar_accounts.append(acc)
+                else:
+                    # Convert Pydantic model to dict
+                    calendar_accounts.append({
+                        "name": getattr(acc, 'name', ''),
+                        "type": getattr(acc, 'type', ''),
+                        "enabled": getattr(acc, 'enabled', True),
+                        "email": getattr(acc, 'email', ''),
+                        "username": getattr(acc, 'username', ''),
+                        "password": getattr(acc, 'password', ''),
+                        "server": getattr(acc, 'server', ''),
+                        "use_autodiscover": getattr(acc, 'use_autodiscover', True),
+                        "credentials_file": getattr(acc, 'credentials_file', ''),
+                        "token_file": getattr(acc, 'token_file', ''),
+                        "url": getattr(acc, 'url', ''),
+                        "calendar_path": getattr(acc, 'calendar_path', ''),
+                    })
+        
+        # Unified calendar tool (supports multiple named accounts)
         self.tools.register(UnifiedCalendarTool(
+            calendar_accounts=calendar_accounts,
+            # Legacy parameters for backward compatibility
             google_enabled=cal_cfg.get("google_enabled", False),
             google_credentials_file=cal_cfg.get("google_credentials_file", ""),
             google_token_file=cal_cfg.get("google_token_file", ""),
@@ -131,12 +165,12 @@ class AgentLoop:
         self.tools.register(GoogleCalendarTool())
         self.tools.register(ExchangeCalendarTool())
         
-        # Email tools
+        # Email tools (legacy)
         self.tools.register(GmailTool())
         self.tools.register(ExchangeEmailTool())
         
         # Unified email tool for email_accounts configuration
-        self.tools.register(UnifiedEmailTool(config=self.calendar_config.get('config') if self.calendar_config else None))
+        self.tools.register(UnifiedEmailTool(config=full_config))
         
         # Contacts tool
         self.tools.register(ContactsTool())
