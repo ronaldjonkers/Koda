@@ -44,11 +44,10 @@ export class WhatsAppClient {
   }
 
   async connect(): Promise<void> {
-    const logger = pino({ level: 'silent' });
+    // Create a completely silent logger to suppress Baileys internal logs
+    const logger = pino({ level: 'silent', enabled: false });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
-
-    console.log(`Using Baileys version: ${version.join('.')}`);
 
     // Create socket following OpenClaw's pattern
     this.sock = makeWASocket({
@@ -62,6 +61,8 @@ export class WhatsAppClient {
       browser: ['koda', 'cli', VERSION],
       syncFullHistory: false,
       markOnlineOnConnect: false,
+      // Suppress session logging
+      getMessage: async () => undefined,
     });
 
     // Handle WebSocket errors
