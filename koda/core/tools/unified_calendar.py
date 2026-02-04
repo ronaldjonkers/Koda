@@ -160,6 +160,23 @@ Parameters for 'create':
         
         # Clients cache by account name
         self._clients: dict[str, Any] = {}
+        
+        # Check if Google Workspace is available (for Meet links)
+        self._google_workspace_client = None
+        self._google_workspace_available = self._check_google_workspace()
+    
+    def _check_google_workspace(self) -> bool:
+        """Check if Google Workspace is configured and authorized."""
+        try:
+            from koda.integrations.google_workspace import GoogleWorkspaceClient
+            client = GoogleWorkspaceClient()
+            status = client.get_status()
+            if status.get("authorized"):
+                self._google_workspace_client = client
+                return True
+        except Exception:
+            pass
+        return False
     
     def _get_client_for_account(self, account: dict) -> Any:
         """Get or create a client for a named account."""
@@ -170,11 +187,15 @@ Parameters for 'create':
         account_type = account.get("type", "")
         
         if account_type == "google":
-            from koda.integrations.google_calendar import GoogleCalendarClient
-            client = GoogleCalendarClient(
-                credentials_file=account.get("credentials_file", ""),
-                token_file=account.get("token_file", "")
-            )
+            # Prefer GoogleWorkspaceClient if available (supports Meet links)
+            if self._google_workspace_client:
+                client = self._google_workspace_client
+            else:
+                from koda.integrations.google_calendar import GoogleCalendarClient
+                client = GoogleCalendarClient(
+                    credentials_file=account.get("credentials_file", ""),
+                    token_file=account.get("token_file", "")
+                )
         elif account_type == "exchange":
             from koda.integrations.exchange_client import ExchangeClient
             client = ExchangeClient(
@@ -385,7 +406,8 @@ _Technische fout is gelogd op de server._"""
         start_str = kwargs.get("start")
         end_str = kwargs.get("end")
         calendar_name = kwargs.get("calendar")
-        add_meet_link = kwargs.get("add_meet_link", False)
+        # Default to adding Meet link if Google Workspace is available
+        add_meet_link = kwargs.get("add_meet_link", self._google_workspace_available)
         whatsapp_reminder = kwargs.get("whatsapp_reminder")
         reminder_phone = kwargs.get("reminder_phone", self.default_reminder_phone)
         
@@ -452,7 +474,11 @@ _Technische fout is gelogd op de server._"""
                     attendees=kwargs.get("attendees"),
                     add_meet_link=add_meet_link
                 )
-                meet_link = result.get("meet_link")
+                # Handle both dict (old client) and dataclass (GoogleWorkspaceClient)
+                if hasattr(result, 'meet_link'):
+                    meet_link = result.meet_link
+                elif isinstance(result, dict):
+                    meet_link = result.get("meet_link")
             
             elif account_type == "exchange":
                 result = client.create_calendar_event(

@@ -19,6 +19,7 @@ from koda.core.tools.message import MessageTool
 from koda.core.tools.spawn import SpawnTool
 from koda.core.tools.unified_calendar import UnifiedCalendarTool
 from koda.core.tools.unified_email import UnifiedEmailTool
+from koda.core.tools.google_meet import GoogleMeetTool
 from koda.core.tools.accounts import AccountsTool
 from koda.core.tools.contacts import ContactsTool
 from koda.core.tools.memory import MemoryTool
@@ -176,6 +177,9 @@ class AgentLoop:
         
         # Unified email tool for email_accounts configuration
         self.tools.register(UnifiedEmailTool(config=full_config))
+        
+        # Google Meet tool (creates Meet links when Google Workspace is connected)
+        self.tools.register(GoogleMeetTool())
         
         # Contacts tool
         self.tools.register(ContactsTool())
