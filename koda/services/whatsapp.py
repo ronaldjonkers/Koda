@@ -241,7 +241,7 @@ class WhatsAppChannel(BaseChannel):
 *Information:*
 /help - Show this help
 /status - Show current settings
-/accounts - Show mail/calendar accounts
+/accounts - Show all configured accounts
 
 *Basic settings:*
 /name <name> - Set your name
@@ -250,14 +250,15 @@ class WhatsAppChannel(BaseChannel):
 /style <style> - Set style (professional, friendly, formal)
 
 *Add accounts:*
-/addmail - Add email account (step by step)
-/addmail json - Add email via JSON
-/addcalendar - Add calendar account (step by step)
-/addcalendar json - Add calendar via JSON
+/addmail - Add email account
+/addcalendar - Add calendar account
+/addlinkedin - Add LinkedIn account
+/addbrave <api_key> - Set Brave Search API key
 
 *Remove accounts:*
 /removemail <name> - Remove email account
 /removecalendar <name> - Remove calendar account
+/removelinkedin - Remove LinkedIn account
 
 *Other:*
 /cancel - Cancel active setup"""
@@ -352,6 +353,23 @@ _Use /accounts for details_"""
                 return "✅ Setup cancelled."
             return "ℹ️ No active setup to cancel."
         
+        elif command == "/addlinkedin":
+            return self._start_linkedin_setup(phone)
+        
+        elif command == "/removelinkedin":
+            return self._remove_linkedin(config)
+        
+        elif command == "/addbrave":
+            if not args:
+                return """❌ Usage: `/addbrave <api_key>`
+
+Get your API key from: https://brave.com/search/api/
+
+Example: `/addbrave BSA1234567890abcdef`"""
+            config.tools.web.search.api_key = args.strip()
+            save_config(config)
+            return "✅ Brave Search API key saved! Web search is now enabled."
+        
         return None  # Not a recognized command
     
     def _format_accounts(self, config) -> str:
@@ -396,8 +414,48 @@ _Use /accounts for details_"""
             else:
                 lines.append("*Calendar:* No accounts configured")
         
-        lines.append("\n_Use /addmail or /addcalendar to add accounts_")
+        lines.append("")
+        
+        # LinkedIn
+        linkedin = getattr(config.integrations, 'linkedin', None)
+        if linkedin and linkedin.enabled:
+            lines.append(f"*LinkedIn:* ✅ {linkedin.email}")
+        else:
+            lines.append("*LinkedIn:* Not configured")
+        
+        # Brave Search
+        brave_key = getattr(config.tools.web.search, 'api_key', '')
+        if brave_key:
+            lines.append(f"*Web Search:* ✅ Brave API configured")
+        else:
+            lines.append("*Web Search:* Not configured")
+        
+        lines.append("\n_Use /addmail, /addcalendar, /addlinkedin, /addbrave_")
         return "\n".join(lines)
+    
+    def _start_linkedin_setup(self, phone: str) -> str:
+        """Start step-by-step LinkedIn setup."""
+        self._setup_sessions[phone] = {
+            "type": "linkedin",
+            "step": 1,
+            "data": {}
+        }
+        return """🔗 *LinkedIn Account Setup*
+
+Step 1/2: Enter your LinkedIn email address:
+
+(or /cancel to stop)"""
+    
+    def _remove_linkedin(self, config) -> str:
+        """Remove LinkedIn configuration."""
+        if not config.integrations.linkedin.enabled:
+            return "ℹ️ LinkedIn is not configured."
+        
+        config.integrations.linkedin.enabled = False
+        config.integrations.linkedin.email = ""
+        config.integrations.linkedin.password = ""
+        save_config(config)
+        return "✅ LinkedIn account removed."
     
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""
@@ -543,6 +601,10 @@ Or /cancel to stop."""
         # Handle step-by-step calendar setup
         if setup_type == "calendar":
             return await self._handle_calendar_setup_step(phone, content, step, data)
+        
+        # Handle step-by-step LinkedIn setup
+        if setup_type == "linkedin":
+            return await self._handle_linkedin_setup_step(phone, content, step, data)
         
         return None
     
@@ -756,6 +818,46 @@ Send 1 or 2:"""
             result = await self._save_account_from_data("calendar", data)
             del self._setup_sessions[phone]
             return result
+        
+        return None
+    
+    async def _handle_linkedin_setup_step(self, phone: str, content: str, step: int, data: dict) -> str:
+        """Handle LinkedIn setup steps."""
+        session = self._setup_sessions[phone]
+        
+        if step == 1:  # Email
+            data["email"] = content
+            session["step"] = 2
+            return "Step 2/2: Enter your LinkedIn password:\n\n⚠️ Note: If you have 2FA enabled, you may need to use an app password."
+        
+        elif step == 2:  # Password
+            data["password"] = content
+            
+            # Save LinkedIn config
+            config = load_config()
+            config.integrations.linkedin.enabled = True
+            config.integrations.linkedin.email = data["email"]
+            config.integrations.linkedin.password = data["password"]
+            save_config(config)
+            
+            del self._setup_sessions[phone]
+            
+            # Trigger config reload
+            await self._auto_reload_config()
+            
+            return f"""✅ *LinkedIn configured!*
+
+Email: {data['email']}
+
+The assistant can now:
+• Check and reply to LinkedIn messages
+• Manage connection requests
+• View and interact with posts
+• Search for people
+
+⚠️ *Important:* LinkedIn may require you to verify new logins. If you see issues, check your LinkedIn email for verification requests.
+
+_Restart Koda to activate: `koda gateway`_"""
         
         return None
     

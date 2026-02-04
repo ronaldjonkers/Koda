@@ -636,6 +636,12 @@ def gateway(
             "language": config.assistant.language,
             "personality": config.assistant.personality,
         },
+        # LinkedIn integration
+        "linkedin": {
+            "enabled": config.integrations.linkedin.enabled,
+            "email": config.integrations.linkedin.email,
+            "password": config.integrations.linkedin.password,
+        },
         # Pass full config for UnifiedEmailTool
         "config": config
     }

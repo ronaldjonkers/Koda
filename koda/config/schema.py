@@ -245,6 +245,20 @@ class ICloudConfig(BaseModel):
     password: str = ""  # App-specific password recommended
 
 
+class LinkedInConfig(BaseModel):
+    """LinkedIn integration configuration.
+    
+    Allows the assistant to:
+    - Check and reply to messages
+    - Manage connection requests
+    - View and interact with posts
+    - Create posts and search for people
+    """
+    enabled: bool = False
+    email: str = ""  # LinkedIn login email
+    password: str = ""  # LinkedIn password
+
+
 class WhatsAppAutoReplyConfig(BaseModel):
     """WhatsApp auto-reply configuration for specific contacts."""
     enabled: bool = False
@@ -304,6 +318,7 @@ class IntegrationsConfig(BaseModel):
     imap: IMAPConfig = Field(default_factory=IMAPConfig)
     bot_email: SMTPConfig = Field(default_factory=SMTPConfig)
     icloud: ICloudConfig = Field(default_factory=ICloudConfig)
+    linkedin: LinkedInConfig = Field(default_factory=LinkedInConfig)
     whatsapp_auto_reply: WhatsAppAutoReplyConfig = Field(default_factory=WhatsAppAutoReplyConfig)
     birthday: BirthdayConfig = Field(default_factory=BirthdayConfig)
     reminder: ReminderConfig = Field(default_factory=ReminderConfig)
