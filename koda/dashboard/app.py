@@ -149,6 +149,87 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
+    @app.post("/api/google-calendar")
+    async def add_google_calendar(request: Request):
+        """Add Google Calendar via CalDAV."""
+        try:
+            data = await request.json()
+            email = data.get("email", "").strip()
+            app_password = data.get("app_password", "").replace(" ", "")
+            
+            if not email or not app_password:
+                raise HTTPException(status_code=400, detail="Email and app_password required")
+            
+            from koda.integrations.google_caldav import GoogleCalDAVClient
+            from koda.config.loader import load_config, save_config
+            
+            client = GoogleCalDAVClient(email, app_password)
+            success, message = client.test_connection()
+            
+            if not success:
+                raise HTTPException(status_code=400, detail=message)
+            
+            # Save to config
+            config = load_config()
+            account = {
+                "name": f"Google ({email.split('@')[0]})",
+                "type": "google_caldav",
+                "email": email,
+                "password": app_password,
+                "enabled": True,
+                "capabilities": ["calendar"]
+            }
+            
+            if not config.integrations.accounts:
+                config.integrations.accounts = []
+            
+            # Update or add
+            found = False
+            for i, acc in enumerate(config.integrations.accounts):
+                if (hasattr(acc, 'email') and acc.email == email) or (isinstance(acc, dict) and acc.get('email') == email):
+                    config.integrations.accounts[i] = account
+                    found = True
+                    break
+            
+            if not found:
+                config.integrations.accounts.append(account)
+            
+            save_config(config)
+            
+            calendars = client.list_calendars()
+            return {"status": "ok", "calendars": [c['name'] for c in calendars]}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/google-help")
+    async def google_help():
+        """Get Google Calendar setup instructions."""
+        return {
+            "instructions": """
+## Google Calendar Setup (CalDAV met App Wachtwoord)
+
+### Stap 1: 2-Stapsverificatie Inschakelen
+Ga naar https://myaccount.google.com/security en zorg dat 2-Stapsverificatie AAN staat.
+
+### Stap 2: App Wachtwoord Aanmaken
+1. Ga naar https://myaccount.google.com/apppasswords
+2. Klik "App selecteren" → "Overige (aangepaste naam)"
+3. Type: "Koda"
+4. Klik "Genereren"
+5. Je krijgt een 16-letter wachtwoord (bijv: abcd efgh ijkl mnop)
+
+### Stap 3: Invullen
+Vul je Gmail adres en het 16-letter App Wachtwoord in het formulier hieronder in.
+
+### Voordelen
+- Geen Google Cloud Console nodig
+- Geen OAuth tokens die verlopen
+- Werkt net als een mailclient
+"""
+        }
+    
     # ============== Web UI ==============
     
     @app.get("/", response_class=HTMLResponse)

@@ -518,10 +518,13 @@ def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     no_bridge: bool = typer.Option(False, "--no-bridge", help="Don't auto-start WhatsApp bridge"),
+    no_dashboard: bool = typer.Option(False, "--no-dashboard", help="Don't auto-start web dashboard"),
+    dashboard_port: int = typer.Option(8081, "--dashboard-port", help="Dashboard port (localhost only)"),
 ):
     """Start the koda gateway."""
     import subprocess
     import signal
+    import threading
     from pathlib import Path
     from koda.config.loader import load_config, get_data_dir
     from koda.messaging.queue import MessageBus
@@ -550,8 +553,29 @@ def gateway(
     
     # Track bridge process for cleanup
     bridge_process = None
+    dashboard_thread = None
     
     config = load_config()
+    
+    # Auto-start dashboard on localhost (not exposed externally)
+    if not no_dashboard:
+        def run_dashboard():
+            try:
+                from koda.dashboard.app import create_app
+                import uvicorn
+                # IMPORTANT: Only bind to 127.0.0.1 (localhost) for security
+                uvicorn.run(
+                    create_app(),
+                    host="127.0.0.1",  # localhost only - not accessible from outside
+                    port=dashboard_port,
+                    log_level="warning"  # Reduce dashboard log noise
+                )
+            except Exception as e:
+                logger.warning(f"Dashboard failed to start: {e}")
+        
+        dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+        dashboard_thread.start()
+        console.print(f"[green]✓[/green] Dashboard: http://localhost:{dashboard_port} (localhost only)")
     
     # Auto-start WhatsApp bridge if enabled
     if config.channels.whatsapp.enabled and not no_bridge:

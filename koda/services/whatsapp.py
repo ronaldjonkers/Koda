@@ -265,6 +265,10 @@ class WhatsAppChannel(BaseChannel):
 /schedules - Show all scheduled tasks
 /delschedule <id> - Delete a scheduled task
 
+*Google Calendar (eenvoudig):*
+/addgoogle <email> <app_password> - Add Google Calendar via App Password
+/googlehelp - Setup instructions for Google Calendar
+
 *Other:*
 /cancel - Cancel active setup
 /resetlinkedin - Reset LinkedIn (clear cookies, force re-login)"""
@@ -386,6 +390,17 @@ Example: `/addbrave BSA1234567890abcdef`"""
         
         elif command == "/resetlinkedin":
             return self._reset_linkedin()
+        
+        elif command == "/googlehelp":
+            return self._google_setup_help()
+        
+        elif command == "/addgoogle":
+            if not args:
+                return "❌ Usage: `/addgoogle <email> <app_password>`\n\nExample:\n`/addgoogle jouw.email@gmail.com abcdefghijklmnop`\n\nUse /googlehelp for setup instructions."
+            parts = args.split(maxsplit=1)
+            if len(parts) < 2:
+                return "❌ Both email and app_password required.\n\nUsage: `/addgoogle <email> <app_password>`"
+            return self._add_google_calendar(parts[0], parts[1])
         
         return None  # Not a recognized command
     
@@ -586,6 +601,114 @@ If you're still having issues:
         except Exception as e:
             logger.error(f"Error resetting LinkedIn: {e}")
             return f"❌ Error resetting LinkedIn: {e}"
+    
+    def _google_setup_help(self) -> str:
+        """Return Google Calendar setup instructions."""
+        return """📅 *Google Calendar Setup (Eenvoudig)*
+
+Met deze methode koppel je Google Calendar zonder API keys of OAuth - net zo simpel als een mailclient!
+
+*Stap 1: 2-Stapsverificatie*
+Ga naar myaccount.google.com/security en zorg dat 2-Stapsverificatie AAN staat.
+
+*Stap 2: App Wachtwoord Maken*
+1. Ga naar: myaccount.google.com/apppasswords
+2. Klik "App selecteren" → "Overige (aangepaste naam)"
+3. Type: "Koda"
+4. Klik "Genereren"
+5. Je krijgt een 16-letter code (bijv: abcd efgh ijkl mnop)
+
+*Stap 3: Koppelen*
+Stuur:
+`/addgoogle jouw.email@gmail.com abcdefghijklmnop`
+
+(zonder spaties in het wachtwoord)
+
+*Belangrijk:*
+• Bewaar het wachtwoord veilig
+• Je kunt het intrekken via myaccount.google.com/apppasswords
+• Dit werkt onbeperkt (geen tokens die verlopen)"""
+    
+    def _add_google_calendar(self, email: str, app_password: str) -> str:
+        """Add Google Calendar via CalDAV with App Password."""
+        try:
+            from koda.integrations.google_caldav import GoogleCalDAVClient
+            from koda.config.loader import load_config, save_config
+            
+            # Clean up password (remove spaces)
+            app_password = app_password.replace(" ", "")
+            
+            # Test connection
+            client = GoogleCalDAVClient(email, app_password)
+            success, message = client.test_connection()
+            
+            if not success:
+                return f"""❌ *Verbinding mislukt*
+
+{message}
+
+*Controleer:*
+• Is 2-Stapsverificatie aan?
+• Gebruik je een App Wachtwoord (16 letters)?
+• Is het email adres correct?
+
+Gebruik /googlehelp voor uitleg."""
+            
+            # Save to config as a calendar account
+            config = load_config()
+            
+            # Create account entry
+            account = {
+                "name": f"Google ({email.split('@')[0]})",
+                "type": "google_caldav",
+                "email": email,
+                "password": app_password,
+                "enabled": True,
+                "capabilities": ["calendar"]
+            }
+            
+            # Add to accounts list
+            if not hasattr(config.integrations, 'accounts') or config.integrations.accounts is None:
+                config.integrations.accounts = []
+            
+            # Check if already exists
+            existing_idx = None
+            for i, acc in enumerate(config.integrations.accounts):
+                acc_email = acc.email if hasattr(acc, 'email') else acc.get('email', '')
+                if acc_email == email:
+                    existing_idx = i
+                    break
+            
+            if existing_idx is not None:
+                config.integrations.accounts[existing_idx] = account
+                action = "bijgewerkt"
+            else:
+                config.integrations.accounts.append(account)
+                action = "toegevoegd"
+            
+            save_config(config)
+            
+            # Get calendar names
+            calendars = client.list_calendars()
+            cal_names = [c['name'] for c in calendars[:5]]
+            
+            return f"""✅ *Google Calendar {action}!*
+
+📧 Account: {email}
+📅 Calendars: {', '.join(cal_names)}
+
+Je kunt nu vragen:
+• "Wat staat er vandaag op mijn agenda?"
+• "Plan een meeting morgen om 14:00"
+• "Toon mijn afspraken deze week"
+
+_Tip: Je kunt meerdere Google accounts toevoegen!_"""
+            
+        except ImportError:
+            return "❌ caldav package niet geïnstalleerd. Run: pip install caldav"
+        except Exception as e:
+            logger.error(f"Error adding Google Calendar: {e}")
+            return f"❌ Error: {e}\n\nGebruik /googlehelp voor setup instructies."
     
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""
