@@ -4,6 +4,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { WhatsAppClient, InboundMessage } from './whatsapp.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface SendCommand {
   type: 'send';
@@ -24,27 +26,60 @@ interface ImageCommand {
   caption?: string;
 }
 
+interface FileCommand {
+  type: 'file';
+  to: string;
+  fileData: string; // base64 encoded
+  filename: string;
+  caption?: string;
+}
+
+interface VideoCommand {
+  type: 'video';
+  to: string;
+  videoData: string; // base64 encoded
+  caption?: string;
+}
+
 interface BridgeMessage {
-  type: 'message' | 'status' | 'qr' | 'error';
+  type: 'message' | 'status' | 'qr' | 'error' | 'file';
   [key: string]: unknown;
+}
+
+interface FileMessage extends BridgeMessage {
+  type: 'file';
+  id: string;
+  sender: string;
+  content: string;
+  timestamp: number;
+  isGroup: boolean;
+  hasMedia: boolean;
+  mediaType?: string;
+  mediaPath?: string;
+  mediaFilename?: string;
+  mediaMimetype?: string;
 }
 
 export class BridgeServer {
   private wss: WebSocketServer | null = null;
   private wa: WhatsAppClient | null = null;
   private clients: Set<WebSocket> = new Set();
+  private downloadDir: string;
 
-  constructor(private port: number, private authDir: string) {}
+  constructor(private port: number, private authDir: string) {
+    this.downloadDir = path.join(process.cwd(), 'downloads');
+  }
 
   async start(): Promise<void> {
     // Create WebSocket server
     this.wss = new WebSocketServer({ port: this.port });
     console.log(`🌉 Bridge server listening on ws://localhost:${this.port}`);
 
-    // Initialize WhatsApp client
+    // Initialize WhatsApp client with download support
     this.wa = new WhatsAppClient({
       authDir: this.authDir,
-      onMessage: (msg) => this.broadcast({ type: 'message', ...msg }),
+      downloadDir: this.downloadDir,
+      onMessage: (msg) => this.handleIncomingMessage(msg),
       onQR: (qr) => this.broadcast({ type: 'qr', qr }),
       onStatus: (status) => this.broadcast({ type: 'status', status }),
     });
@@ -56,9 +91,9 @@ export class BridgeServer {
 
       ws.on('message', async (data) => {
         try {
-          const cmd = JSON.parse(data.toString()) as SendCommand;
+          const cmd = JSON.parse(data.toString()) as SendCommand | TypingCommand | ImageCommand | FileCommand | VideoCommand;
           await this.handleCommand(cmd);
-          ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
+          ws.send(JSON.stringify({ type: 'sent', success: true }));
         } catch (error) {
           console.error('Error handling command:', error);
           ws.send(JSON.stringify({ type: 'error', error: String(error) }));
@@ -80,7 +115,44 @@ export class BridgeServer {
     await this.wa.connect();
   }
 
-  private async handleCommand(cmd: SendCommand | TypingCommand | ImageCommand): Promise<void> {
+  private handleIncomingMessage(msg: InboundMessage): void {
+    // If message has media, read the file and send as base64
+    if (msg.hasMedia && msg.mediaPath) {
+      try {
+        const fileData = fs.readFileSync(msg.mediaPath);
+        const base64Data = fileData.toString('base64');
+        
+        const fileMsg: FileMessage = {
+          type: 'file',
+          id: msg.id,
+          sender: msg.sender,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          isGroup: msg.isGroup,
+          hasMedia: true,
+          mediaType: msg.mediaType,
+          mediaData: base64Data,
+          mediaFilename: msg.mediaFilename,
+          mediaMimetype: msg.mediaMimetype,
+          mediaPath: msg.mediaPath,
+        };
+        
+        this.broadcast(fileMsg);
+        return;
+      } catch (error) {
+        console.error('Error reading media file:', error);
+        // Fall through to regular message
+      }
+    }
+    
+    // Regular text message
+    this.broadcast({
+      type: 'message',
+      ...msg
+    });
+  }
+
+  private async handleCommand(cmd: SendCommand | TypingCommand | ImageCommand | FileCommand | VideoCommand): Promise<void> {
     if (!this.wa) return;
     
     if (cmd.type === 'send') {
@@ -90,10 +162,16 @@ export class BridgeServer {
     } else if (cmd.type === 'image') {
       const imageBuffer = Buffer.from(cmd.imageData, 'base64');
       await this.wa.sendImage(cmd.to, imageBuffer, cmd.caption);
+    } else if (cmd.type === 'file') {
+      const fileBuffer = Buffer.from(cmd.fileData, 'base64');
+      await this.wa.sendFile(cmd.to, fileBuffer, cmd.filename, cmd.caption);
+    } else if (cmd.type === 'video') {
+      const videoBuffer = Buffer.from(cmd.videoData, 'base64');
+      await this.wa.sendVideo(cmd.to, videoBuffer, cmd.caption);
     }
   }
 
-  private broadcast(msg: BridgeMessage): void {
+  private broadcast(msg: BridgeMessage | FileMessage): void {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {

@@ -1377,6 +1377,11 @@ def gateway(
             if proactive_service:
                 await proactive_service.start()
             
+            # Connect WhatsApp channel to agent for file sending
+            whatsapp_channel = channels.get_channel("whatsapp")
+            if whatsapp_channel:
+                agent.set_whatsapp_channel(whatsapp_channel)
+            
             tasks = [agent.run(), channels.start_all()]
             if webhook_server:
                 tasks.append(webhook_server.start())

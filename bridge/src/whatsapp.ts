@@ -10,11 +10,14 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   jidDecode,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const VERSION = '0.1.0';
 
@@ -50,6 +53,11 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  hasMedia?: boolean;
+  mediaType?: string;
+  mediaPath?: string;
+  mediaFilename?: string;
+  mediaMimetype?: string;
 }
 
 export interface WhatsAppClientOptions {
@@ -57,6 +65,7 @@ export interface WhatsAppClientOptions {
   onMessage: (msg: InboundMessage) => void;
   onQR: (qr: string) => void;
   onStatus: (status: string) => void;
+  downloadDir?: string;
 }
 
 export class WhatsAppClient {
@@ -64,9 +73,18 @@ export class WhatsAppClient {
   private options: WhatsAppClientOptions;
   private reconnecting = false;
   private sentMessageIds: Set<string> = new Set(); // Track sent messages to prevent loops
+  private downloadDir: string;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+    this.downloadDir = options.downloadDir || path.join(process.cwd(), 'downloads');
+    this.ensureDownloadDir();
+  }
+
+  private ensureDownloadDir(): void {
+    if (!fs.existsSync(this.downloadDir)) {
+      fs.mkdirSync(this.downloadDir, { recursive: true });
+    }
   }
 
   async connect(): Promise<void> {
@@ -185,17 +203,23 @@ export class WhatsAppClient {
           continue;
         }
         
+        // Extract content and handle media
         const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        const mediaInfo = await this.extractMediaInfo(msg);
         
         const sender = isMessageToSelf && myJid ? myJid : remoteJid;
         
         this.options.onMessage({
           id: msg.key.id || '',
           sender,
-          content,
+          content: content || mediaInfo.caption || '[Media]',
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          hasMedia: mediaInfo.hasMedia,
+          mediaType: mediaInfo.mediaType,
+          mediaPath: mediaInfo.mediaPath,
+          mediaFilename: mediaInfo.filename,
+          mediaMimetype: mediaInfo.mimetype,
         });
       }
     });
@@ -217,25 +241,126 @@ export class WhatsAppClient {
 
     // Image with caption
     if (message.imageMessage?.caption) {
-      return `[Image] ${message.imageMessage.caption}`;
+      return message.imageMessage.caption;
     }
 
     // Video with caption
     if (message.videoMessage?.caption) {
-      return `[Video] ${message.videoMessage.caption}`;
+      return message.videoMessage.caption;
     }
 
     // Document with caption
     if (message.documentMessage?.caption) {
-      return `[Document] ${message.documentMessage.caption}`;
-    }
-
-    // Voice/Audio message
-    if (message.audioMessage) {
-      return `[Voice Message]`;
+      return message.documentMessage.caption;
     }
 
     return null;
+  }
+
+  private async extractMediaInfo(msg: any): Promise<{
+    hasMedia: boolean;
+    mediaType?: string;
+    caption?: string;
+    filename?: string;
+    mimetype?: string;
+    mediaPath?: string;
+  }> {
+    const message = msg.message;
+    if (!message) return { hasMedia: false };
+
+    let mediaMsg: any = null;
+    let mediaType = '';
+
+    // Check for different media types
+    if (message.imageMessage) {
+      mediaMsg = message.imageMessage;
+      mediaType = 'image';
+    } else if (message.videoMessage) {
+      mediaMsg = message.videoMessage;
+      mediaType = 'video';
+    } else if (message.documentMessage) {
+      mediaMsg = message.documentMessage;
+      mediaType = 'document';
+    } else if (message.audioMessage) {
+      mediaMsg = message.audioMessage;
+      mediaType = 'audio';
+    } else if (message.stickerMessage) {
+      mediaMsg = message.stickerMessage;
+      mediaType = 'sticker';
+    }
+
+    if (!mediaMsg) return { hasMedia: false };
+
+    try {
+      // Download the media
+      const buffer = await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: this.sock.updateMediaMessage,
+        }
+      );
+
+      if (!buffer) {
+        return { hasMedia: true, mediaType, caption: mediaMsg.caption };
+      }
+
+      // Generate filename
+      const timestamp = Date.now();
+      const extension = this.getExtensionFromMimetype(mediaMsg.mimetype, mediaType);
+      const filename = mediaMsg.fileName || `${mediaType}_${timestamp}${extension}`;
+      const filepath = path.join(this.downloadDir, filename);
+
+      // Save to disk
+      fs.writeFileSync(filepath, buffer);
+
+      return {
+        hasMedia: true,
+        mediaType,
+        caption: mediaMsg.caption,
+        filename,
+        mimetype: mediaMsg.mimetype,
+        mediaPath: filepath,
+      };
+    } catch (error) {
+      console.error('Error downloading media:', error);
+      return { hasMedia: true, mediaType, caption: mediaMsg.caption };
+    }
+  }
+
+  private getExtensionFromMimetype(mimetype: string, mediaType: string): string {
+    const mimeToExt: { [key: string]: string } = {
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'video/mp4': '.mp4',
+      'video/ogg': '.ogg',
+      'audio/ogg': '.ogg',
+      'audio/mp4': '.m4a',
+      'audio/mpeg': '.mp3',
+      'application/pdf': '.pdf',
+      'text/plain': '.txt',
+      'application/msword': '.doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    };
+
+    if (mimetype && mimeToExt[mimetype]) {
+      return mimeToExt[mimetype];
+    }
+
+    // Default extensions by media type
+    const defaultExt: { [key: string]: string } = {
+      image: '.jpg',
+      video: '.mp4',
+      audio: '.ogg',
+      document: '.bin',
+      sticker: '.webp',
+    };
+
+    return defaultExt[mediaType] || '.bin';
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
@@ -288,6 +413,66 @@ export class WhatsAppClient {
       this.sentMessageIds.add(result.key.id);
       setTimeout(() => this.sentMessageIds.delete(result.key.id), 60000);
     }
+  }
+
+  async sendFile(to: string, fileData: Buffer, filename: string, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    // Determine mimetype from filename
+    const mimetype = this.getMimetypeFromFilename(filename);
+
+    const result = await this.sock.sendMessage(to, {
+      document: fileData,
+      mimetype: mimetype,
+      fileName: filename,
+      caption: caption || undefined,
+    });
+    
+    // Track the message ID to prevent processing it as incoming
+    if (result?.key?.id) {
+      this.sentMessageIds.add(result.key.id);
+      setTimeout(() => this.sentMessageIds.delete(result.key.id), 60000);
+    }
+  }
+
+  async sendVideo(to: string, videoData: Buffer, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const result = await this.sock.sendMessage(to, {
+      video: videoData,
+      caption: caption || undefined,
+    });
+    
+    // Track the message ID to prevent processing it as incoming
+    if (result?.key?.id) {
+      this.sentMessageIds.add(result.key.id);
+      setTimeout(() => this.sentMessageIds.delete(result.key.id), 60000);
+    }
+  }
+
+  private getMimetypeFromFilename(filename: string): string {
+    const extToMime: { [key: string]: string } = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.txt': 'text/plain',
+      '.mp4': 'video/mp4',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4',
+    };
+
+    const ext = path.extname(filename).toLowerCase();
+    return extToMime[ext] || 'application/octet-stream';
   }
 
   async disconnect(): Promise<void> {

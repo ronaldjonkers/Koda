@@ -36,6 +36,7 @@ from koda.core.tools.proactive import ProactiveAssistantTool
 from koda.core.tools.natural_language import NaturalLanguageTool
 from koda.core.tools.image_generation import ImageGenerationTool
 from koda.core.tools.public_events import PublicEventsTool
+from koda.core.tools.file_sender import FileSenderTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -249,12 +250,14 @@ class AgentLoop:
         
         # Image Generation
         img_config = full_config.tools.image_generation if full_config else None
-        self.tools.register(ImageGenerationTool(
+        self.image_tool = ImageGenerationTool(
             workspace=self.workspace,
             openrouter_api_key=full_config.providers.openrouter.api_key if full_config else None,
             stability_api_key=img_config.stability_ai.api_key if img_config and img_config.stability_ai.enabled else None,
-            together_api_key=None  # Not yet implemented
-        ))
+            together_api_key=None,  # Not yet implemented
+            on_image_generated=self._on_image_generated
+        )
+        self.tools.register(self.image_tool)
         
         # Public Events (sports, concerts, F1, etc.)
         events_config = full_config.tools.public_events if full_config else None
@@ -263,6 +266,32 @@ class AgentLoop:
             workspace=self.workspace,
             football_api_key=football_key
         ))
+        
+        # File Sender (for sending files/images via WhatsApp)
+        self.file_sender_tool = FileSenderTool()
+        self.tools.register(self.file_sender_tool)
+    
+    def set_whatsapp_channel(self, channel):
+        """Set the WhatsApp channel for file sending."""
+        if hasattr(self, 'file_sender_tool'):
+            self.file_sender_tool.whatsapp = channel
+            logger.info("✅ File sender connected to WhatsApp channel")
+    
+    async def _on_image_generated(self, result):
+        """Callback when an image is generated - sends via WhatsApp if channel available."""
+        try:
+            if hasattr(self, 'file_sender_tool') and self.file_sender_tool.whatsapp:
+                # Get current recipient from file sender tool
+                recipient = self.file_sender_tool._last_recipient
+                if recipient:
+                    await self.file_sender_tool.send_generated_image(
+                        result.local_path, 
+                        result.prompt, 
+                        recipient
+                    )
+                    logger.info(f"📤 Auto-sent generated image to {recipient}")
+        except Exception as e:
+            logger.error(f"Error auto-sending image: {e}")
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""
@@ -442,6 +471,10 @@ class AgentLoop:
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
+        
+        # Update file sender recipient for auto-sending generated files
+        if hasattr(self, 'file_sender_tool'):
+            self.file_sender_tool.set_recipient(msg.chat_id)
         
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(

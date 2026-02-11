@@ -170,6 +170,64 @@ class WhatsAppChannel(BaseChannel):
         except Exception as e:
             logger.error(f"❌ Error sending image: {e}")
     
+    async def send_file(self, chat_id: str, file_data: bytes, filename: str, caption: str | None = None) -> None:
+        """Send a file through WhatsApp.
+        
+        Args:
+            chat_id: WhatsApp JID to send to
+            file_data: Raw file bytes
+            filename: Name of the file
+            caption: Optional caption text
+        """
+        if not self._ws or not self._connected:
+            logger.warning("⚠️ WhatsApp bridge not connected - cannot send file")
+            return
+        
+        try:
+            import base64
+            file_b64 = base64.b64encode(file_data).decode('utf-8')
+            
+            payload = {
+                "type": "file",
+                "to": chat_id,
+                "fileData": file_b64,
+                "filename": filename,
+                "caption": caption
+            }
+            logger.info(f"📤 Sending file '{filename}' to {chat_id[:20]}... ({len(file_data)} bytes)")
+            await self._ws.send(json.dumps(payload))
+            logger.info(f"✅ File sent successfully")
+        except Exception as e:
+            logger.error(f"❌ Error sending file: {e}")
+    
+    async def send_video(self, chat_id: str, video_data: bytes, caption: str | None = None) -> None:
+        """Send a video through WhatsApp.
+        
+        Args:
+            chat_id: WhatsApp JID to send to
+            video_data: Raw video bytes
+            caption: Optional caption text
+        """
+        if not self._ws or not self._connected:
+            logger.warning("⚠️ WhatsApp bridge not connected - cannot send video")
+            return
+        
+        try:
+            import base64
+            video_b64 = base64.b64encode(video_data).decode('utf-8')
+            
+            payload = {
+                "type": "video",
+                "to": chat_id,
+                "videoData": video_b64,
+                "caption": caption
+            }
+            logger.info(f"📤 Sending video to {chat_id[:20]}... ({len(video_data)} bytes)")
+            await self._ws.send(json.dumps(payload))
+            logger.info(f"✅ Video sent successfully")
+        except Exception as e:
+            logger.error(f"❌ Error sending video: {e}")
+    
     def _load_contact_rules(self) -> None:
         """Load contact rules into a lookup dict."""
         self._contact_rules = {}
@@ -2164,6 +2222,95 @@ The account is now active."""
                     logger.info(f"QR Data: {qr_data}")
                     logger.info("Install 'qrcode' package to display QR in terminal: pip install qrcode")
             logger.info("="*50 + "\n")
+        
+        elif msg_type == "file":
+            # Incoming file/media message from WhatsApp
+            sender = data.get("sender", "")
+            content = data.get("content", "")
+            media_type = data.get("mediaType", "file")
+            media_filename = data.get("mediaFilename", "unknown")
+            media_mimetype = data.get("mediaMimetype", "")
+            media_data = data.get("mediaData", "")  # base64 encoded
+            
+            # sender is typically: <phone>@s.whatsapp.net
+            phone = sender.split("@")[0] if "@" in sender else sender
+            
+            # Save the file
+            file_path = None
+            if media_data:
+                try:
+                    import base64
+                    from pathlib import Path
+                    
+                    # Create downloads directory
+                    downloads_dir = Path.home() / ".koda" / "workspace" / "downloads"
+                    downloads_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Decode and save
+                    file_bytes = base64.b64decode(media_data)
+                    file_path = downloads_dir / media_filename
+                    
+                    # Handle duplicate filenames
+                    counter = 1
+                    original_path = file_path
+                    while file_path.exists():
+                        stem = original_path.stem
+                        suffix = original_path.suffix
+                        file_path = downloads_dir / f"{stem}_{counter}{suffix}"
+                        counter += 1
+                    
+                    file_path.write_bytes(file_bytes)
+                    logger.info(f"💾 Saved received file: {file_path} ({len(file_bytes)} bytes)")
+                except Exception as e:
+                    logger.error(f"Failed to save received file: {e}")
+            
+            logger.info(f"📥 WhatsApp {media_type} from +{phone}: {media_filename}")
+            
+            # Check for commands (only from allowed users)
+            if content.startswith("/") and self.is_allowed(phone):
+                parts = content.split(maxsplit=1)
+                command = parts[0].lower()
+                args = parts[1] if len(parts) > 1 else ""
+                
+                response = await self._handle_command(command, args, sender, phone)
+                if response:
+                    await self.send(OutboundMessage(
+                        channel="whatsapp",
+                        chat_id=sender,
+                        content=response
+                    ))
+                    return
+            
+            # Build metadata with file info
+            contact_rule = self._get_contact_rule(phone)
+            contact_name = contact_rule.name if contact_rule else None
+            
+            metadata = {
+                "message_id": data.get("id"),
+                "timestamp": data.get("timestamp"),
+                "is_group": data.get("isGroup", False),
+                "contact_name": contact_name,
+                "custom_instructions": self._get_instructions_for_contact(phone),
+                "is_bot_mode": self.config.bot_mode,
+                "has_media": True,
+                "media_type": media_type,
+                "media_filename": media_filename,
+                "media_mimetype": media_mimetype,
+                "media_path": str(file_path) if file_path else None,
+            }
+            
+            # Create content description with file info
+            file_description = f"[{media_type.upper()}: {media_filename}"
+            if content and content != f"[{media_type.capitalize()}]":
+                file_description += f" - Caption: {content}"
+            file_description += "]"
+            
+            await self._handle_message(
+                sender_id=phone,
+                chat_id=sender,
+                content=file_description,
+                metadata=metadata
+            )
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")

@@ -180,7 +180,8 @@ Examples:
         workspace: Path,
         openrouter_api_key: str | None = None,
         stability_api_key: str | None = None,
-        together_api_key: str | None = None
+        together_api_key: str | None = None,
+        on_image_generated: callable | None = None
     ):
         self.workspace = workspace
         self.output_dir = workspace / "generated_images"
@@ -192,6 +193,9 @@ Examples:
             ImageProvider.TOGETHER: together_api_key,
             ImageProvider.POLLINATIONS: "free",  # No key needed
         }
+        
+        # Callback when image is generated
+        self.on_image_generated = on_image_generated
         
         # Track usage
         self.usage_file = self.output_dir / "usage.json"
@@ -321,6 +325,14 @@ Examples:
         # Save and track
         if result.local_path:
             self._track_usage(result)
+            
+            # Trigger callback if set (for sending via WhatsApp)
+            if self.on_image_generated:
+                try:
+                    await self.on_image_generated(result)
+                except Exception as e:
+                    logger.error(f"Error in image generated callback: {e}")
+            
             return self._format_result(result)
         else:
             return f"❌ Failed to generate image. Please try again or use a different provider."
