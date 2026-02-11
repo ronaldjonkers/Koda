@@ -37,6 +37,7 @@ from koda.core.tools.natural_language import NaturalLanguageTool
 from koda.core.tools.image_generation import ImageGenerationTool, APIKeyMissingError
 from koda.core.tools.public_events import PublicEventsTool
 from koda.core.tools.file_sender import FileSenderTool
+from koda.core.tools.document_reader import DocumentReaderTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -277,6 +278,9 @@ class AgentLoop:
         # File Sender (for sending files/images via WhatsApp)
         self.file_sender_tool = FileSenderTool()
         self.tools.register(self.file_sender_tool)
+        
+        # Document Reader (for reading PDFs, Word docs, etc. sent via WhatsApp)
+        self.tools.register(DocumentReaderTool())
     
     def set_whatsapp_channel(self, channel):
         """Set the WhatsApp channel for file sending."""
@@ -550,10 +554,39 @@ I can generate images for you! Choose a provider:
         if hasattr(self, 'file_sender_tool'):
             self.file_sender_tool.set_recipient(msg.chat_id)
         
+        # Check for file attachments in metadata (from WhatsApp)
+        current_message = msg.content
+        if msg.metadata and msg.metadata.get("has_media"):
+            media_type = msg.metadata.get("media_type", "file")
+            media_path = msg.metadata.get("media_path")
+            media_filename = msg.metadata.get("media_filename", "unknown")
+            
+            if media_path:
+                # For documents, instruct the AI to read them
+                if media_type in ["document", "file"]:
+                    current_message = f"""{msg.content}
+
+📎 **ATTACHMENT RECEIVED:**
+- Type: {media_type}
+- Filename: {media_filename}
+- Path: {media_path}
+
+**IMPORTANT:** Use the `document_reader` tool to read this file and answer the user's question about its content. Call document_reader with path="{media_path}""""
+                
+                # For images that are not in msg.media yet
+                elif media_type == "image" and not msg.media:
+                    current_message = f"""{msg.content}
+
+🖼️ **IMAGE RECEIVED:**
+- Filename: {media_filename}
+- Path: {media_path}
+
+The image has been saved and is available for reference."""
+        
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
-            current_message=msg.content,
+            current_message=current_message,
             media=msg.media if msg.media else None,
         )
         
