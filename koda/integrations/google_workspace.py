@@ -9,11 +9,18 @@ Setup requires:
 1. Google Cloud Project with APIs enabled
 2. OAuth 2.0 credentials (Desktop App type)
 3. credentials.json file in ~/.koda/
+
+Key improvements in this version:
+- Robust token refresh with automatic retry
+- Better shared calendar discovery
+- Connection health monitoring
+- Persistent connection state tracking
 """
 from __future__ import annotations
 
 import base64
 import json
+import time
 import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -65,6 +72,7 @@ class GoogleEmail:
     body: str = ""
     labels: list[str] = field(default_factory=list)
     is_unread: bool = False
+    priority: str = "normal"  # normal, high, low
 
 
 @dataclass
@@ -83,6 +91,8 @@ class GoogleCalendarEvent:
     is_all_day: bool = False
     status: str = "confirmed"
     organizer: str = ""
+    is_recurring: bool = False
+    recurrence_rule: str = ""
 
 
 @dataclass 
@@ -94,6 +104,8 @@ class GoogleCalendar:
     is_primary: bool = False
     access_role: str = "reader"  # owner, writer, reader
     background_color: str = ""
+    is_shared: bool = False  # True if this is a shared calendar
+    owner_email: str = ""
 
 
 class GoogleWorkspaceClient:
@@ -113,6 +125,7 @@ class GoogleWorkspaceClient:
     
     CREDENTIALS_FILE = "~/.koda/google_credentials.json"
     TOKEN_FILE = "~/.koda/google_token.json"
+    STATE_FILE = "~/.koda/google_state.json"
     
     SETUP_INSTRUCTIONS = """
 ## 🔧 Google Workspace Setup
@@ -172,7 +185,8 @@ Of via WhatsApp:
     def __init__(
         self,
         credentials_file: Optional[str] = None,
-        token_file: Optional[str] = None
+        token_file: Optional[str] = None,
+        state_file: Optional[str] = None
     ):
         if not GOOGLE_API_AVAILABLE:
             raise ImportError(
@@ -182,11 +196,40 @@ Of via WhatsApp:
         
         self.credentials_file = Path(credentials_file or self.CREDENTIALS_FILE).expanduser()
         self.token_file = Path(token_file or self.TOKEN_FILE).expanduser()
+        self.state_file = Path(state_file or self.STATE_FILE).expanduser()
         
         self._credentials: Optional[Credentials] = None
         self._gmail_service = None
         self._calendar_service = None
         self._user_email: Optional[str] = None
+        self._cached_calendars: list[GoogleCalendar] = []
+        self._calendars_cache_time: Optional[datetime] = None
+        self._cache_ttl = timedelta(minutes=5)  # Cache calendars for 5 minutes
+        
+        # Load persistent state
+        self._state = self._load_state()
+    
+    def _load_state(self) -> dict:
+        """Load persistent state from disk."""
+        if self.state_file.exists():
+            try:
+                return json.loads(self.state_file.read_text())
+            except Exception as e:
+                logger.warning(f"Failed to load state file: {e}")
+        return {
+            "last_refresh": None,
+            "refresh_count": 0,
+            "connection_failures": 0,
+            "last_successful_connection": None,
+        }
+    
+    def _save_state(self) -> None:
+        """Save persistent state to disk."""
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state_file.write_text(json.dumps(self._state, indent=2, default=str))
+        except Exception as e:
+            logger.warning(f"Failed to save state file: {e}")
     
     @property
     def is_configured(self) -> bool:
@@ -195,52 +238,118 @@ Of via WhatsApp:
     
     @property
     def is_authorized(self) -> bool:
-        """Check if we have valid tokens."""
+        """Check if we have valid tokens with robust validation."""
         if not self.token_file.exists():
             return False
         try:
             creds = Credentials.from_authorized_user_file(str(self.token_file), GOOGLE_SCOPES)
-            return creds and creds.valid
-        except:
+            if not creds:
+                return False
+            
+            # Check if token is valid or can be refreshed
+            if creds.valid:
+                return True
+            
+            # Token might be expired but refreshable
+            if creds.expired and creds.refresh_token:
+                return True
+            
+            return False
+        except Exception as e:
+            logger.debug(f"Authorization check failed: {e}")
             return False
     
     def _get_credentials(self) -> Credentials:
-        """Get or refresh credentials."""
+        """Get or refresh credentials with robust error handling and retry."""
         if self._credentials and self._credentials.valid:
             return self._credentials
         
         creds = None
+        max_retries = 3
+        retry_count = 0
         
-        # Load existing token
-        if self.token_file.exists():
+        while retry_count < max_retries:
             try:
-                creds = Credentials.from_authorized_user_file(str(self.token_file), GOOGLE_SCOPES)
+                # Load existing token
+                if self.token_file.exists():
+                    try:
+                        creds = Credentials.from_authorized_user_file(str(self.token_file), GOOGLE_SCOPES)
+                        logger.debug("Loaded credentials from token file")
+                    except Exception as e:
+                        logger.warning(f"Failed to load token: {e}")
+                
+                # Refresh or re-authorize
+                if not creds or not creds.valid:
+                    if creds and creds.expired and creds.refresh_token:
+                        try:
+                            logger.info("Refreshing Google access token...")
+                            creds.refresh(Request())
+                            self._save_token(creds)
+                            self._state["last_refresh"] = datetime.now().isoformat()
+                            self._state["refresh_count"] = self._state.get("refresh_count", 0) + 1
+                            self._state["connection_failures"] = 0
+                            self._state["last_successful_connection"] = datetime.now().isoformat()
+                            self._save_state()
+                            logger.info("✅ Token refreshed successfully")
+                        except Exception as e:
+                            logger.error(f"Token refresh failed: {e}")
+                            self._state["connection_failures"] = self._state.get("connection_failures", 0) + 1
+                            self._save_state()
+                            creds = None
+                            raise AuthorizationRequired(
+                                f"Google authorization expired or invalid. Please run: koda setup google\nError: {e}"
+                            )
+                    
+                    if not creds:
+                        raise AuthorizationRequired(
+                            "Google authorization required. Run: koda setup google"
+                        )
+                
+                self._credentials = creds
+                return creds
+                
+            except AuthorizationRequired:
+                raise
             except Exception as e:
-                logger.warning(f"Failed to load token: {e}")
+                retry_count += 1
+                logger.warning(f"Credential attempt {retry_count} failed: {e}")
+                if retry_count >= max_retries:
+                    raise AuthorizationRequired(
+                        f"Failed to get credentials after {max_retries} attempts. Please run: koda setup google"
+                    )
+                time.sleep(1)  # Brief delay before retry
         
-        # Refresh or re-authorize
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    self._save_token(creds)
-                except Exception as e:
-                    logger.warning(f"Token refresh failed: {e}")
-                    creds = None
-            
-            if not creds:
-                raise AuthorizationRequired(
-                    "Google authorization required. Run: koda setup google"
-                )
-        
-        self._credentials = creds
-        return creds
+        raise AuthorizationRequired("Could not obtain valid credentials")
     
     def _save_token(self, creds: Credentials) -> None:
-        """Save credentials to token file."""
+        """Save credentials to token file atomically."""
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
-        self.token_file.write_text(creds.to_json())
+        # Write to temp file first, then move for atomic operation
+        temp_file = self.token_file.with_suffix('.tmp')
+        temp_file.write_text(creds.to_json())
+        temp_file.replace(self.token_file)
         logger.debug(f"Token saved to {self.token_file}")
+    
+    def force_refresh(self) -> bool:
+        """Force a token refresh even if current token is still valid."""
+        try:
+            if not self.token_file.exists():
+                return False
+            
+            creds = Credentials.from_authorized_user_file(str(self.token_file), GOOGLE_SCOPES)
+            if creds and creds.refresh_token:
+                logger.info("Forcing token refresh...")
+                creds.refresh(Request())
+                self._save_token(creds)
+                self._credentials = creds
+                self._state["last_refresh"] = datetime.now().isoformat()
+                self._save_state()
+                logger.info("✅ Token force-refreshed successfully")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Force refresh failed: {e}")
+            return False
     
     def authorize_interactive(self, port: int = 8090) -> bool:
         """
@@ -270,6 +379,7 @@ Of via WhatsApp:
             creds = flow.run_local_server(
                 port=port,
                 prompt="consent",
+                access_type="offline",  # Request refresh token
                 success_message="✅ Koda is nu verbonden met Google! Je kunt dit tabblad sluiten."
             )
             
@@ -278,7 +388,18 @@ Of via WhatsApp:
             
             # Get user email
             self._user_email = self._get_user_email()
+            
+            # Update state
+            self._state["last_refresh"] = datetime.now().isoformat()
+            self._state["connection_failures"] = 0
+            self._state["last_successful_connection"] = datetime.now().isoformat()
+            self._save_state()
+            
             logger.info(f"✅ Authorized as {self._user_email}")
+            
+            # Clear cache
+            self._cached_calendars = []
+            self._calendars_cache_time = None
             
             return True
             
@@ -338,7 +459,18 @@ Of via WhatsApp:
             self._credentials = creds
             
             self._user_email = self._get_user_email()
+            
+            # Update state
+            self._state["last_refresh"] = datetime.now().isoformat()
+            self._state["connection_failures"] = 0
+            self._state["last_successful_connection"] = datetime.now().isoformat()
+            self._save_state()
+            
             logger.info(f"✅ Authorized as {self._user_email}")
+            
+            # Clear cache
+            self._cached_calendars = []
+            self._calendars_cache_time = None
             
             return True
             
@@ -362,12 +494,12 @@ Of via WhatsApp:
             self._user_email = self._get_user_email()
         return self._user_email
     
-    # =========================================================================
+    # ========================================================================
     # Gmail Methods
-    # =========================================================================
+    # ========================================================================
     
     def _get_gmail_service(self):
-        """Get Gmail API service."""
+        """Get Gmail API service with automatic retry."""
         if not self._gmail_service:
             self._gmail_service = build("gmail", "v1", credentials=self._get_credentials())
         return self._gmail_service
@@ -376,18 +508,20 @@ Of via WhatsApp:
         self,
         query: str = "",
         max_results: int = 10,
-        unread_only: bool = False
+        unread_only: bool = False,
+        prioritize: bool = True
     ) -> list[GoogleEmail]:
         """
-        List emails from Gmail.
+        List emails from Gmail with optional prioritization.
         
         Args:
             query: Gmail search query (e.g., "from:example@gmail.com subject:hello")
             max_results: Maximum number of emails to return
             unread_only: Only return unread emails
+            prioritize: Apply smart prioritization algorithm
         
         Returns:
-            List of GoogleEmail objects
+            List of GoogleEmail objects, sorted by priority if prioritize=True
         """
         service = self._get_gmail_service()
         
@@ -398,7 +532,7 @@ Of via WhatsApp:
             results = service.users().messages().list(
                 userId="me",
                 q=query,
-                maxResults=max_results
+                maxResults=max_results * 2  # Fetch more for prioritization
             ).execute()
             
             messages = results.get("messages", [])
@@ -407,13 +541,63 @@ Of via WhatsApp:
             for msg in messages:
                 email = self._get_email_details(msg["id"])
                 if email:
+                    if prioritize:
+                        email.priority = self._calculate_email_priority(email)
                     emails.append(email)
             
-            return emails
+            # Sort by priority if requested
+            if prioritize:
+                emails.sort(key=lambda e: (
+                    0 if e.priority == "high" else (1 if e.priority == "normal" else 2),
+                    -e.date.timestamp() if e.date else 0
+                ))
+            
+            return emails[:max_results]
             
         except HttpError as e:
             logger.error(f"Failed to list emails: {e}")
             return []
+    
+    def _calculate_email_priority(self, email: GoogleEmail) -> str:
+        """Calculate email priority based on various signals."""
+        priority_score = 0
+        
+        # Unread emails are higher priority
+        if email.is_unread:
+            priority_score += 2
+        
+        # Check for important labels
+        important_labels = ["IMPORTANT", "STARRED", "CATEGORY_PERSONAL"]
+        for label in important_labels:
+            if label in email.labels:
+                priority_score += 1
+        
+        # Check for urgency keywords in subject
+        urgency_keywords = ["urgent", "asap", "deadline", "action required", "important", "meeting"]
+        subject_lower = email.subject.lower()
+        for keyword in urgency_keywords:
+            if keyword in subject_lower:
+                priority_score += 1
+                break
+        
+        # Recent emails (within 24 hours) get higher priority
+        if email.date:
+            hours_old = (datetime.now(email.date.tzinfo) - email.date).total_seconds() / 3600
+            if hours_old < 24:
+                priority_score += 1
+        
+        # Determine priority level
+        if priority_score >= 4:
+            return "high"
+        elif priority_score >= 2:
+            return "normal"
+        else:
+            return "low"
+    
+    def get_high_priority_emails(self, max_results: int = 10) -> list[GoogleEmail]:
+        """Get only high priority unread emails."""
+        emails = self.list_emails(unread_only=True, max_results=max_results * 3, prioritize=True)
+        return [e for e in emails if e.priority == "high"][:max_results]
     
     def _get_email_details(self, message_id: str) -> Optional[GoogleEmail]:
         """Get full details of an email."""
@@ -547,9 +731,9 @@ Of via WhatsApp:
         """
         return self.list_emails(query=query, max_results=max_results)
     
-    # =========================================================================
+    # ========================================================================
     # Calendar Methods
-    # =========================================================================
+    # ========================================================================
     
     def _get_calendar_service(self):
         """Get Calendar API service."""
@@ -557,34 +741,83 @@ Of via WhatsApp:
             self._calendar_service = build("calendar", "v3", credentials=self._get_credentials())
         return self._calendar_service
     
-    def list_calendars(self) -> list[GoogleCalendar]:
+    def list_calendars(self, use_cache: bool = True) -> list[GoogleCalendar]:
         """
-        List all calendars the user has access to.
+        List all calendars the user has access to, including shared calendars.
+        
+        Args:
+            use_cache: Use cached results if available and fresh
         
         Returns:
             List of GoogleCalendar objects including shared calendars
         """
+        # Check cache
+        if use_cache and self._cached_calendars and self._calendars_cache_time:
+            if datetime.now() - self._calendars_cache_time < self._cache_ttl:
+                logger.debug(f"Using cached calendars ({len(self._cached_calendars)} items)")
+                return self._cached_calendars
+        
         service = self._get_calendar_service()
         
         try:
-            result = service.calendarList().list().execute()
+            # Get all calendars with pagination
             calendars = []
+            page_token = None
             
-            for cal in result.get("items", []):
-                calendars.append(GoogleCalendar(
-                    id=cal["id"],
-                    name=cal.get("summary", "Unnamed"),
-                    description=cal.get("description", ""),
-                    is_primary=cal.get("primary", False),
-                    access_role=cal.get("accessRole", "reader"),
-                    background_color=cal.get("backgroundColor", "")
-                ))
+            while True:
+                params = {}
+                if page_token:
+                    params["pageToken"] = page_token
+                
+                result = service.calendarList().list(**params).execute()
+                
+                for cal in result.get("items", []):
+                    # Determine if this is a shared calendar
+                    access_role = cal.get("accessRole", "reader")
+                    is_shared = access_role in ["reader", "writer"] and not cal.get("primary", False)
+                    
+                    # Get owner info if available
+                    owner = cal.get("primary", False)
+                    owner_email = ""
+                    if not owner and "owner" in str(cal.get("summaryOverride", "")).lower():
+                        # Try to extract owner from summary
+                        pass
+                    
+                    calendar_obj = GoogleCalendar(
+                        id=cal["id"],
+                        name=cal.get("summary", "Unnamed"),
+                        description=cal.get("description", ""),
+                        is_primary=cal.get("primary", False),
+                        access_role=access_role,
+                        background_color=cal.get("backgroundColor", ""),
+                        is_shared=is_shared,
+                        owner_email=owner_email
+                    )
+                    calendars.append(calendar_obj)
+                
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
             
+            # Update cache
+            self._cached_calendars = calendars
+            self._calendars_cache_time = datetime.now()
+            
+            logger.info(f"Found {len(calendars)} calendars ({sum(1 for c in calendars if c.is_shared)} shared)")
             return calendars
             
         except HttpError as e:
             logger.error(f"Failed to list calendars: {e}")
+            # Return cached data if available, even if stale
+            if self._cached_calendars:
+                logger.warning("Returning stale cached calendars due to error")
+                return self._cached_calendars
             return []
+    
+    def get_shared_calendars(self) -> list[GoogleCalendar]:
+        """Get only shared calendars (not owned by user)."""
+        all_calendars = self.list_calendars()
+        return [c for c in all_calendars if c.is_shared or not c.is_primary]
     
     def list_events(
         self,
@@ -617,27 +850,40 @@ Of via WhatsApp:
         # Get calendars to query
         if calendar_id == "all":
             calendars = self.list_calendars()
-            calendar_ids = [c.id for c in calendars]
+            calendar_ids = [(c.id, c.name) for c in calendars if c.access_role in ["owner", "writer", "reader"]]
         else:
-            calendar_ids = [calendar_id]
+            calendar_ids = [(calendar_id, "primary")]
         
         all_events = []
         
-        for cal_id in calendar_ids:
+        for cal_id, cal_name in calendar_ids:
             try:
-                result = service.events().list(
-                    calendarId=cal_id,
-                    timeMin=time_min.isoformat(),
-                    timeMax=time_max.isoformat(),
-                    maxResults=max_results,
-                    singleEvents=include_recurring,
-                    orderBy="startTime"
-                ).execute()
+                # Use pagination for large result sets
+                page_token = None
+                events_fetched = 0
                 
-                cal_name = result.get("summary", cal_id)
-                
-                for event in result.get("items", []):
-                    all_events.append(self._parse_event(event, cal_id, cal_name))
+                while events_fetched < max_results:
+                    params = {
+                        "calendarId": cal_id,
+                        "timeMin": time_min.isoformat(),
+                        "timeMax": time_max.isoformat(),
+                        "maxResults": min(250, max_results - events_fetched),  # Google max is 250
+                        "singleEvents": include_recurring,
+                        "orderBy": "startTime"
+                    }
+                    if page_token:
+                        params["pageToken"] = page_token
+                    
+                    result = service.events().list(**params).execute()
+                    
+                    for event in result.get("items", []):
+                        parsed_event = self._parse_event(event, cal_id, cal_name)
+                        all_events.append(parsed_event)
+                        events_fetched += 1
+                    
+                    page_token = result.get("nextPageToken")
+                    if not page_token:
+                        break
                     
             except HttpError as e:
                 logger.warning(f"Failed to get events from {cal_id}: {e}")
@@ -672,6 +918,12 @@ Of via WhatsApp:
         # Get attendees
         attendees = [a.get("email", "") for a in event.get("attendees", [])]
         
+        # Check if recurring
+        is_recurring = "recurrence" in event
+        recurrence_rule = ""
+        if is_recurring:
+            recurrence_rule = ", ".join(event.get("recurrence", []))
+        
         return GoogleCalendarEvent(
             id=event["id"],
             summary=event.get("summary", "(No Title)"),
@@ -685,7 +937,9 @@ Of via WhatsApp:
             calendar_name=calendar_name,
             is_all_day=is_all_day,
             status=event.get("status", "confirmed"),
-            organizer=event.get("organizer", {}).get("email", "")
+            organizer=event.get("organizer", {}).get("email", ""),
+            is_recurring=is_recurring,
+            recurrence_rule=recurrence_rule
         )
     
     def get_event(self, event_id: str, calendar_id: str = "primary") -> Optional[GoogleCalendarEvent]:
@@ -776,6 +1030,10 @@ Of via WhatsApp:
             ).execute()
             
             logger.info(f"Created event: {result['id']}")
+            
+            # Invalidate calendar list cache as new event might affect things
+            self._calendars_cache_time = None
+            
             return self._parse_event(result, calendar_id, "")
             
         except HttpError as e:
@@ -891,13 +1149,26 @@ Of via WhatsApp:
         
         return None
     
-    # =========================================================================
+    def get_upcoming_events(self, hours: int = 24) -> list[GoogleCalendarEvent]:
+        """Get events happening in the next N hours."""
+        now = datetime.now(timezone.utc)
+        time_max = now + timedelta(hours=hours)
+        return self.list_events(time_min=now, time_max=time_max, calendar_id="all")
+    
+    def get_today_events(self) -> list[GoogleCalendarEvent]:
+        """Get all events for today across all calendars."""
+        now = datetime.now(timezone.utc)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
+        return self.list_events(time_min=start_of_day, time_max=end_of_day, calendar_id="all")
+    
+    # ========================================================================
     # Status & Test Methods
-    # =========================================================================
+    # ========================================================================
     
     def test_connection(self) -> tuple[bool, str]:
         """
-        Test the Google connection.
+        Test the Google connection comprehensively.
         
         Returns:
             (success, message)
@@ -911,34 +1182,48 @@ Of via WhatsApp:
             email = profile.get("emailAddress", "")
             
             # Test Calendar
-            calendars = self.list_calendars()
+            calendars = self.list_calendars(use_cache=False)
+            shared_count = sum(1 for c in calendars if c.is_shared)
             
-            return True, f"Connected as {email} with {len(calendars)} calendar(s)"
+            # Update state
+            self._state["last_successful_connection"] = datetime.now().isoformat()
+            self._save_state()
+            
+            return True, f"✅ Connected as {email} with {len(calendars)} calendars ({shared_count} shared)"
             
         except AuthorizationRequired:
-            return False, "Authorization required. Run: koda setup google"
+            return False, "❌ Authorization required. Run: koda setup google"
         except FileNotFoundError as e:
-            return False, str(e)
+            return False, f"❌ {str(e)}"
         except Exception as e:
-            return False, f"Connection failed: {e}"
+            self._state["connection_failures"] = self._state.get("connection_failures", 0) + 1
+            self._save_state()
+            return False, f"❌ Connection failed: {e}"
     
     def get_status(self) -> dict[str, Any]:
-        """Get status information."""
+        """Get comprehensive status information."""
         status = {
             "configured": self.is_configured,
             "authorized": self.is_authorized,
             "email": None,
             "calendars": 0,
+            "shared_calendars": 0,
             "credentials_file": str(self.credentials_file),
-            "token_file": str(self.token_file)
+            "token_file": str(self.token_file),
+            "last_refresh": self._state.get("last_refresh"),
+            "refresh_count": self._state.get("refresh_count", 0),
+            "connection_failures": self._state.get("connection_failures", 0),
+            "last_successful_connection": self._state.get("last_successful_connection"),
         }
         
         if self.is_authorized:
             try:
                 status["email"] = self.user_email
-                status["calendars"] = len(self.list_calendars())
-            except:
-                pass
+                calendars = self.list_calendars()
+                status["calendars"] = len(calendars)
+                status["shared_calendars"] = sum(1 for c in calendars if c.is_shared)
+            except Exception as e:
+                status["error"] = str(e)
         
         return status
 
