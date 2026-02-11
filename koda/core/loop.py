@@ -33,6 +33,7 @@ from koda.core.tools.apple import AppleNotesTool, AppleRemindersTool, AppleMessa
 from koda.core.tools.smarthome import PhilipsHueTool
 from koda.core.tools.onepassword import OnePasswordTool
 from koda.core.tools.proactive import ProactiveAssistantTool
+from koda.core.tools.natural_language import NaturalLanguageTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -240,6 +241,9 @@ class AgentLoop:
         
         # Proactive Assistant (executive secretary features)
         self.tools.register(ProactiveAssistantTool())
+        
+        # Natural Language Processor
+        self.tools.register(NaturalLanguageTool())
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""
