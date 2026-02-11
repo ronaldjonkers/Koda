@@ -1077,6 +1077,50 @@ def gateway(
     except Exception as e:
         logger.debug(f"Calendar watcher not started: {e}")
     
+    # Start proactive reminder service (new executive assistant features)
+    proactive_service = None
+    try:
+        from koda.services.proactive_reminder import (
+            ProactiveReminderService, ReminderConfig
+        )
+        
+        # Create proactive reminder config
+        proactive_config = ReminderConfig(
+            calendar_reminders_enabled=True,
+            calendar_default_minutes_before=15,
+            calendar_morning_check_time="08:00",
+            birthday_reminders_enabled=True,
+            birthday_days_before=1,
+            birthday_send_time="09:00",
+            special_occasions_enabled=True,
+            email_digest_enabled=True,
+            email_digest_time="08:30",
+            default_channel="whatsapp",
+            default_recipient=config.channels.whatsapp.owner_phone or "",
+            quiet_hours_start="22:00",
+            quiet_hours_end="07:00",
+            respect_quiet_hours=True
+        )
+        
+        async def send_proactive_message(channel: str, recipient: str, message: str):
+            """Send proactive reminder via messaging channel."""
+            from koda.messaging.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel,
+                chat_id=recipient if recipient else config.channels.whatsapp.owner_phone + "@s.whatsapp.net",
+                content=message
+            ))
+        
+        proactive_service = ProactiveReminderService(
+            config=proactive_config,
+            send_callback=send_proactive_message
+        )
+        
+        await proactive_service.start()
+        console.print(f"[green]✓[/green] Proactive assistant: enabled (reminders, birthdays, briefings)")
+    except Exception as e:
+        logger.warning(f"Proactive reminder service not started: {e}")
+    
     async def run():
         try:
             await cron.start()
@@ -1097,6 +1141,8 @@ def gateway(
                 email_watcher.stop()
             if calendar_watcher:
                 calendar_watcher.stop()
+            if proactive_service:
+                await proactive_service.stop()
             heartbeat.stop()
             cron.stop()
             reminder_service.stop()
