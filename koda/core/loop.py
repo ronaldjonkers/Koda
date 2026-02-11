@@ -32,6 +32,7 @@ from koda.core.tools.browser import BrowserTool
 from koda.core.tools.apple import AppleNotesTool, AppleRemindersTool, AppleMessagesTool
 from koda.core.tools.smarthome import PhilipsHueTool
 from koda.core.tools.onepassword import OnePasswordTool
+from koda.core.tools.proactive import ProactiveAssistantTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -236,6 +237,9 @@ class AgentLoop:
         
         # 1Password integration
         self.tools.register(OnePasswordTool())
+        
+        # Proactive Assistant (executive secretary features)
+        self.tools.register(ProactiveAssistantTool())
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""
