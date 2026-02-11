@@ -1821,7 +1821,7 @@ daemon_app = typer.Typer(help="Manage Koda as a system daemon")
 @app.command("setup-image")
 def setup_image(
     provider: str = typer.Option("pollinations", "--provider", "-p", 
-        help="Provider: pollinations (free), openrouter, stability_ai, replicate"),
+        help="Provider: pollinations (free), openrouter, stability_ai, replicate, gemini"),
     api_key: str = typer.Option("", "--api-key", "-k", help="API key (not needed for pollinations)"),
     enable: bool = typer.Option(True, "--enable/--disable", help="Enable/disable this provider"),
     default: bool = typer.Option(False, "--default", "-d", help="Set as default provider"),
@@ -1833,18 +1833,20 @@ def setup_image(
     - openrouter: Uses your existing OpenRouter API key. Supports multiple models.
     - stability_ai: Official Stability AI API. Requires API key.
     - replicate: Replicate platform API. Requires API key.
+    - gemini: Google Gemini Imagen (Nana Banana). Requires API key from Google AI Studio.
     
     Examples:
         koda setup-image --provider pollinations
         koda setup-image --provider openrouter --default
         koda setup-image --provider stability_ai --api-key sk-xxx
         koda setup-image --provider replicate --api-key r8_xxx --default
+        koda setup-image --provider gemini --api-key YOUR_GOOGLE_API_KEY --default
     """
     from pathlib import Path
     from koda.config import get_config, save_config
     from koda.config.schema import ImageProviderConfig
     
-    valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate"]
+    valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate", "gemini"]
     if provider not in valid_providers:
         console.print(f"[red]❌ Invalid provider: {provider}[/red]")
         console.print(f"Valid options: {', '.join(valid_providers)}")
@@ -1867,6 +1869,14 @@ def setup_image(
         console.print("[green]✓ Pollinations is a free service - no API key needed![/green]")
         console.print("[dim]  Supports: Stable Diffusion XL, FLUX models")
         console.print("  Rate limits may apply for high usage.[/dim]\n")
+    elif provider == "gemini":
+        console.print("[blue]ℹ️  Google Gemini Imagen (Nana Banana)[/blue]")
+        console.print("[dim]  Get your API key from: https://aistudio.google.com/app/apikey")
+        console.print("  Supports: imagen-3.0 models with high quality generation[/dim]\n")
+        if not api_key:
+            console.print(f"[yellow]⚠️  API key required for {provider}[/yellow]")
+            console.print("Use --api-key to provide your key.")
+            raise typer.Exit(1)
     elif not api_key:
         console.print(f"[yellow]⚠️  API key required for {provider}[/yellow]")
         console.print("Use --api-key to provide your key, or set it in the dashboard.")
@@ -1897,6 +1907,8 @@ def setup_image(
         config.tools.image_generation.stability_ai = provider_config
     elif provider == "replicate":
         config.tools.image_generation.replicate = provider_config
+    elif provider == "gemini":
+        config.tools.image_generation.gemini = provider_config
     
     # Set as default if requested
     if default:
@@ -1917,6 +1929,7 @@ def setup_image(
             ("openrouter", img_cfg.openrouter),
             ("stability_ai", img_cfg.stability_ai),
             ("replicate", img_cfg.replicate),
+            ("gemini", img_cfg.gemini),
         ]
         for name, pconf in providers:
             is_default = " (default)" if config.tools.image_generation.default_provider == name else ""

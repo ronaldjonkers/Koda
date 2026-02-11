@@ -372,8 +372,8 @@ class WhatsAppChannel(BaseChannel):
 
 *Image Generation:*
 /imageproviders - Show image provider status
-/addimagekey <provider> <key> - Add API key for paid providers
-/setimageprovider <name> - Set default provider (pollinations, openrouter, etc)
+/addimagekey <provider> <key> - Add API key (gemini, stability, openrouter, replicate)
+/setimageprovider <name> - Set default provider (pollinations, gemini, openrouter, etc)
 
 *Public Events:*
 /events - Show upcoming events (sports, concerts)
@@ -1168,12 +1168,14 @@ No providers configured yet.
 `/setimageprovider pollinations` - Free, no signup needed
 
 Or add a paid provider:
+`/addimagekey gemini YOUR_GOOGLE_KEY`
 `/addimagekey stability sk-xxx...`"""
         
         lines = ["🎨 *Image Generation Providers*\n"]
         
         providers = [
             ("pollinations", img_cfg.pollinations, "🆓 Free"),
+            ("gemini", img_cfg.gemini, "🧠 Google Imagen"),
             ("openrouter", img_cfg.openrouter, "🔑 Uses existing key"),
             ("stability_ai", img_cfg.stability_ai, "💎 Paid"),
             ("replicate", img_cfg.replicate, "💎 Paid"),
@@ -1205,7 +1207,7 @@ Or add a paid provider:
         provider = parts[0].lower()
         api_key = parts[1] if len(parts) > 1 else ""
         
-        valid_providers = ["pollinations", "openrouter", "stability", "stability_ai", "replicate"]
+        valid_providers = ["pollinations", "openrouter", "stability", "stability_ai", "replicate", "gemini"]
         if provider not in valid_providers:
             return f"❌ Invalid provider. Valid: {', '.join(valid_providers)}"
         
@@ -1217,6 +1219,8 @@ Or add a paid provider:
         if provider == "pollinations":
             api_key = ""
         elif not api_key:
+            if provider == "gemini":
+                return "❌ API key required for Gemini.\n\nGet your key at: https://aistudio.google.com/app/apikey\nUsage: `/addimagekey gemini YOUR_API_KEY`"
             return f"❌ API key required for {provider}. Usage: `/addimagekey {provider} <key>`"
         
         config = load_config()
@@ -1240,6 +1244,8 @@ Or add a paid provider:
             config.tools.image_generation.stability_ai = pconf
         elif provider == "replicate":
             config.tools.image_generation.replicate = pconf
+        elif provider == "gemini":
+            config.tools.image_generation.gemini = pconf
         
         # Set as default if no default set yet
         if not config.tools.image_generation.default_provider:
@@ -1254,7 +1260,7 @@ Or add a paid provider:
         """Set the default image provider."""
         from koda.config.loader import load_config, save_config
         
-        valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate"]
+        valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate", "gemini"]
         if provider not in valid_providers:
             return f"❌ Invalid provider. Valid: {', '.join(valid_providers)}"
         
@@ -1281,12 +1287,16 @@ Or add a paid provider:
         elif provider == "replicate":
             if not config.tools.image_generation.replicate.enabled:
                 config.tools.image_generation.replicate.enabled = True
+        elif provider == "gemini":
+            if not config.tools.image_generation.gemini.enabled:
+                config.tools.image_generation.gemini.enabled = True
         
         config.tools.image_generation.default_provider = provider
         save_config(config)
         
         provider_info = {
             "pollinations": "🆓 Free, no signup needed",
+            "gemini": "🧠 Google Imagen - get key at aistudio.google.com/app/apikey",
             "openrouter": "🔑 Uses your existing OpenRouter key",
             "stability_ai": "💎 Requires Stability AI API key",
             "replicate": "💎 Requires Replicate API key",

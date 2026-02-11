@@ -527,6 +527,7 @@ class ImageGenerationConfig(BaseModel):
     openrouter: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
     stability_ai: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
     replicate: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
+    gemini: ImageProviderConfig = Field(default_factory=ImageProviderConfig)  # Google Gemini Imagen
     default_provider: str = "pollinations"
     save_images: bool = True
     image_directory: str = "images"

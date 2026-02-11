@@ -56,6 +56,14 @@ class ToolRegistry:
         try:
             return await tool.execute(**params)
         except Exception as e:
+            # Re-raise APIKeyMissingError so it can be handled by the agent
+            # Local import to avoid circular dependency
+            try:
+                from koda.core.tools.image_generation import APIKeyMissingError
+                if isinstance(e, APIKeyMissingError):
+                    raise
+            except ImportError:
+                pass
             return f"Error executing {name}: {str(e)}"
     
     @property

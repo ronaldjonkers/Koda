@@ -34,7 +34,7 @@ from koda.core.tools.smarthome import PhilipsHueTool
 from koda.core.tools.onepassword import OnePasswordTool
 from koda.core.tools.proactive import ProactiveAssistantTool
 from koda.core.tools.natural_language import NaturalLanguageTool
-from koda.core.tools.image_generation import ImageGenerationTool
+from koda.core.tools.image_generation import ImageGenerationTool, APIKeyMissingError
 from koda.core.tools.public_events import PublicEventsTool
 from koda.core.tools.file_sender import FileSenderTool
 from koda.plugins.loader import PluginLoader
@@ -250,12 +250,19 @@ class AgentLoop:
         
         # Image Generation
         img_config = full_config.tools.image_generation if full_config else None
+        # Load Gemini API key if available
+        gemini_key = None
+        if img_config and hasattr(img_config, 'gemini') and img_config.gemini.enabled:
+            gemini_key = img_config.gemini.api_key
+        
         self.image_tool = ImageGenerationTool(
             workspace=self.workspace,
             openrouter_api_key=full_config.providers.openrouter.api_key if full_config else None,
             stability_api_key=img_config.stability_ai.api_key if img_config and img_config.stability_ai.enabled else None,
             together_api_key=None,  # Not yet implemented
-            on_image_generated=self._on_image_generated
+            gemini_api_key=gemini_key,
+            on_image_generated=self._on_image_generated,
+            on_api_key_missing=self._on_image_api_key_missing
         )
         self.tools.register(self.image_tool)
         
@@ -292,6 +299,73 @@ class AgentLoop:
                     logger.info(f"📤 Auto-sent generated image to {recipient}")
         except Exception as e:
             logger.error(f"Error auto-sending image: {e}")
+    
+    async def _on_image_api_key_missing(self, provider: str) -> str:
+        """Called when an API key is missing for image generation.
+        
+        Returns a helpful message asking the user to provide the API key.
+        """
+        provider_names = {
+            "gemini": "Google Gemini Imagen (Nana Banana)",
+            "stability": "Stability AI",
+            "together": "Together AI",
+            "openrouter": "OpenRouter",
+            "any": "an image generation provider"
+        }
+        
+        provider_name = provider_names.get(provider, provider)
+        
+        messages = {
+            "gemini": """🔑 *API Key Required*
+
+To use Google Gemini Imagen (Nana Banana), I need an API key.
+
+*Get your free API key:*
+1. Go to: https://aistudio.google.com/app/apikey
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the key
+
+*Then send me:*
+`/addimagekey gemini YOUR_API_KEY`
+
+Or use: `koda setup-image --provider gemini --api-key YOUR_KEY`""",
+            
+            "stability": """🔑 *API Key Required*
+
+To use Stability AI, I need an API key.
+
+*Get your key at:* https://platform.stability.ai/
+
+*Then send me:*
+`/addimagekey stability YOUR_API_KEY`""",
+            
+            "openrouter": """🔑 *API Key Required*
+
+To use OpenRouter for images, I need an API key.
+
+*Get your key at:* https://openrouter.ai/keys
+
+*Then send me:*
+`/addimagekey openrouter YOUR_API_KEY`""",
+            
+            "any": """🔑 *Image Generation Setup*
+
+I can generate images for you! Choose a provider:
+
+*Free Option:*
+• Pollinations - Works immediately, no key needed
+  `/setimageprovider pollinations`
+
+*High Quality Options (API key required):*
+• Gemini (Google Imagen) - https://aistudio.google.com/app/apikey
+• Stability AI - https://platform.stability.ai/
+
+*To add a key:*
+`/addimagekey <provider> YOUR_API_KEY`"""
+        }
+        
+        return messages.get(provider, messages["any"])
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""
@@ -522,7 +596,14 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    try:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    except APIKeyMissingError as e:
+                        # Handle missing API key for image generation
+                        if self.image_tool and self.image_tool.on_api_key_missing:
+                            result = await self.image_tool.on_api_key_missing(e.provider)
+                        else:
+                            result = f"🔑 API key required for {e.provider}. Use `/addimagekey {e.provider} YOUR_KEY` or run `koda setup-image --provider {e.provider} --api-key YOUR_KEY`"
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )

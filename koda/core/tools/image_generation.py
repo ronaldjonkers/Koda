@@ -4,6 +4,7 @@ Supports:
 - Pollinations.ai (free, no API key required)
 - OpenRouter (uses existing API key, models like FLUX)
 - Stability AI (optional, requires API key)
+- Google Gemini (Imagen/Nana Banana - requires API key)
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ class ImageProvider(str, Enum):
     OPENROUTER = "openrouter"      # Uses existing OpenRouter key
     STABILITY = "stability"        # Requires Stability AI key
     TOGETHER = "together"          # Together AI (optional)
+    GEMINI = "gemini"              # Google Gemini/Imagen (Nana Banana)
 
 
 @dataclass
@@ -48,6 +50,13 @@ class GeneratedImage:
     cost: float | None  # Cost in USD if applicable
 
 
+class APIKeyMissingError(Exception):
+    """Raised when an API key is missing for a provider."""
+    def __init__(self, provider: str):
+        self.provider = provider
+        super().__init__(f"API key missing for provider: {provider}")
+
+
 class ImageGenerationTool(BaseTool):
     """
     Generate images using AI models from various providers.
@@ -56,6 +65,7 @@ class ImageGenerationTool(BaseTool):
     - pollinations: FREE, no API key needed. Uses Stable Diffusion / FLUX
     - openrouter: Uses your existing OpenRouter API key. Models like FLUX, DALL-E
     - stability: Requires Stability AI API key. High quality images
+    - gemini: Google Gemini Imagen (Nana Banana) - requires API key
     
     The tool automatically selects the best available provider based on:
     1. Explicit provider choice
@@ -69,6 +79,7 @@ class ImageGenerationTool(BaseTool):
     - generate: Create an image from a text prompt
     - providers: List available providers and their status
     - models: List available models for a provider
+    - set_api_key: Store API key for a provider (for WhatsApp/CLI use)
     
     Parameters for 'generate':
     - prompt: Text description of the image to generate
@@ -80,6 +91,10 @@ class ImageGenerationTool(BaseTool):
     
     Parameters for 'providers':
     - show_all: Include providers without API keys
+    
+    Parameters for 'set_api_key':
+    - provider: Provider name (gemini, stability, etc.)
+    - api_key: The API key to store
     
     Examples:
     - "Generate an image of a cat wearing a space suit"
@@ -118,7 +133,7 @@ Examples:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["generate", "providers", "models"],
+                "enum": ["generate", "providers", "models", "set_api_key"],
                 "description": "Action to perform"
             },
             "prompt": {
@@ -127,7 +142,7 @@ Examples:
             },
             "provider": {
                 "type": "string",
-                "enum": ["pollinations", "openrouter", "stability", "auto"],
+                "enum": ["pollinations", "openrouter", "stability", "gemini", "auto"],
                 "description": "Provider to use (default: auto - picks best available)"
             },
             "model": {
@@ -160,6 +175,10 @@ Examples:
             "negative_prompt": {
                 "type": "string",
                 "description": "Things to avoid in the image (optional)"
+            },
+            "api_key": {
+                "type": "string",
+                "description": "API key for provider (for 'set_api_key' action)"
             }
         },
         "required": ["action"]
@@ -181,7 +200,9 @@ Examples:
         openrouter_api_key: str | None = None,
         stability_api_key: str | None = None,
         together_api_key: str | None = None,
-        on_image_generated: callable | None = None
+        gemini_api_key: str | None = None,
+        on_image_generated: callable | None = None,
+        on_api_key_missing: callable | None = None
     ):
         self.workspace = workspace
         self.output_dir = workspace / "generated_images"
@@ -192,10 +213,14 @@ Examples:
             ImageProvider.STABILITY: stability_api_key,
             ImageProvider.TOGETHER: together_api_key,
             ImageProvider.POLLINATIONS: "free",  # No key needed
+            ImageProvider.GEMINI: gemini_api_key,
         }
         
         # Callback when image is generated
         self.on_image_generated = on_image_generated
+        
+        # Callback when API key is missing (for prompting user)
+        self.on_api_key_missing = on_api_key_missing
         
         # Track usage
         self.usage_file = self.output_dir / "usage.json"
@@ -241,22 +266,33 @@ Examples:
         """Select the best available provider."""
         if preferred and preferred != "auto":
             provider = ImageProvider(preferred)
-            if self.api_keys.get(provider):
+            key = self.api_keys.get(provider)
+            if key and key != "":
                 return provider
+            # Trigger callback for missing API key
+            if self.on_api_key_missing and provider != ImageProvider.POLLINATIONS:
+                raise APIKeyMissingError(provider.value)
             raise ValueError(f"Provider '{preferred}' not available (no API key configured)")
         
-        # Priority: Pollinations (free) > OpenRouter (existing key) > others
+        # Priority: Pollinations (free) > OpenRouter (existing key) > Gemini > others
         if self.api_keys.get(ImageProvider.POLLINATIONS):
             return ImageProvider.POLLINATIONS
         
         if self.api_keys.get(ImageProvider.OPENROUTER):
             return ImageProvider.OPENROUTER
         
+        if self.api_keys.get(ImageProvider.GEMINI):
+            return ImageProvider.GEMINI
+        
         if self.api_keys.get(ImageProvider.STABILITY):
             return ImageProvider.STABILITY
         
         if self.api_keys.get(ImageProvider.TOGETHER):
             return ImageProvider.TOGETHER
+        
+        # No providers available - try to trigger callback
+        if self.on_api_key_missing:
+            raise APIKeyMissingError("any")
         
         raise ValueError("No image generation providers available. Configure an API key or use Pollinations (free).")
     
@@ -271,8 +307,13 @@ Examples:
                 return self._list_providers()
             elif action == "models":
                 return self._list_models(kwargs.get("provider"))
+            elif action == "set_api_key":
+                return await self._set_api_key(**kwargs)
             else:
                 return f"Unknown action: {action}"
+        except APIKeyMissingError as e:
+            # Re-raise so the agent can handle it
+            raise
         except Exception as e:
             logger.error(f"Image generation error: {e}")
             return f"❌ Error: {str(e)}"
@@ -314,6 +355,10 @@ Examples:
         elif selected_provider == ImageProvider.OPENROUTER:
             result = await self._generate_openrouter(
                 prompt, model, width, height, seed
+            )
+        elif selected_provider == ImageProvider.GEMINI:
+            result = await self._generate_gemini(
+                prompt, model, width, height, aspect_ratio
             )
         elif selected_provider == ImageProvider.STABILITY:
             result = await self._generate_stability(
@@ -610,6 +655,168 @@ Examples:
                 logger.error(f"Stability AI request failed: {e}")
                 raise
     
+    async def _generate_gemini(
+        self,
+        prompt: str,
+        model: str | None = None,
+        width: int = 1024,
+        height: int = 1024,
+        aspect_ratio: str | None = None
+    ) -> GeneratedImage:
+        """Generate image using Google Gemini Imagen (Nana Banana)."""
+        
+        api_key = self.api_keys.get(ImageProvider.GEMINI)
+        if not api_key:
+            raise ValueError("Gemini API key not configured")
+        
+        # Use Imagen 3 by default
+        model = model or "imagen-3.0-generate-002"
+        
+        # Map dimensions to aspect ratio for Gemini
+        aspect_map = {
+            (1024, 1024): "1:1",
+            (1344, 768): "16:9",
+            (1184, 864): "4:3",
+            (1248, 832): "3:2",
+            (768, 1344): "9:16",
+        }
+        
+        gemini_aspect = aspect_map.get((width, height), aspect_ratio or "1:1")
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        # Gemini Imagen API payload
+        payload = {
+            "instances": [
+                {
+                    "prompt": prompt,
+                }
+            ],
+            "parameters": {
+                "sampleCount": 1,
+                "aspectRatio": gemini_aspect,
+                "outputOptions": {
+                    "mimeType": "image/png"
+                }
+            }
+        }
+        
+        logger.info(f"Calling Gemini Imagen API with model: {model}")
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predict",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract image from response
+                predictions = data.get("predictions", [])
+                if not predictions:
+                    raise ValueError("No image returned from Gemini Imagen")
+                
+                # Gemini returns base64 encoded image
+                image_data_base64 = predictions[0].get("bytesBase64Encoded", "")
+                if not image_data_base64:
+                    raise ValueError("Empty image data from Gemini Imagen")
+                
+                image_data = base64.b64decode(image_data_base64)
+                base64_data = f"data:image/png;base64,{image_data_base64}"
+                
+                # Save to file
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                prompt_hash = hashlib.md5(prompt.encode()).hexdigest()[:8]
+                filename = f"gemini_{timestamp}_{prompt_hash}.png"
+                local_path = self.output_dir / filename
+                local_path.write_bytes(image_data)
+                
+                # Estimate cost (Gemini is roughly $0.03-0.06 per image depending on resolution)
+                cost = 0.04
+                
+                return GeneratedImage(
+                    url=None,
+                    base64_data=base64_data,
+                    local_path=local_path,
+                    provider="gemini",
+                    model=model,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    seed=None,  # Gemini doesn't expose seed
+                    cost=cost
+                )
+                
+            except httpx.HTTPStatusError as e:
+                error_text = e.response.text
+                logger.error(f"Gemini Imagen API error: {e.response.status_code} - {error_text}")
+                
+                # Check for specific error messages
+                if "API key not valid" in error_text:
+                    raise ValueError("Invalid Gemini API key. Please check your key.")
+                elif "quota" in error_text.lower():
+                    raise ValueError("Gemini API quota exceeded.")
+                else:
+                    raise ValueError(f"Gemini Imagen API error: {e.response.status_code}")
+                    
+            except Exception as e:
+                logger.error(f"Gemini Imagen request failed: {e}")
+                raise
+    
+    async def _set_api_key(self, provider: str | None = None, api_key: str | None = None, **kwargs) -> str:
+        """Store API key for a provider."""
+        if not provider or not api_key:
+            return "❌ Error: Both 'provider' and 'api_key' are required."
+        
+        valid_providers = ["gemini", "stability", "together", "openrouter"]
+        if provider not in valid_providers:
+            return f"❌ Invalid provider. Valid options: {', '.join(valid_providers)}"
+        
+        # Update local key
+        provider_enum = ImageProvider(provider)
+        self.api_keys[provider_enum] = api_key
+        
+        # Save to config file for persistence
+        try:
+            from koda.config.loader import load_config, save_config
+            from koda.config.schema import ImageProviderConfig
+            
+            config = load_config()
+            
+            # Ensure tools.image_generation exists
+            if not hasattr(config, 'tools') or config.tools is None:
+                from koda.config.schema import ToolsConfig, ImageGenerationConfig
+                config.tools = ToolsConfig()
+            if not hasattr(config.tools, 'image_generation') or config.tools.image_generation is None:
+                from koda.config.schema import ImageGenerationConfig
+                config.tools.image_generation = ImageGenerationConfig()
+            
+            # Create provider config
+            pconf = ImageProviderConfig(enabled=True, api_key=api_key, default_model="")
+            
+            # Update specific provider
+            if provider == "gemini":
+                config.tools.image_generation.gemini = pconf
+            elif provider == "stability":
+                config.tools.image_generation.stability_ai = pconf
+            elif provider == "together":
+                config.tools.image_generation.together = pconf
+            elif provider == "openrouter":
+                config.tools.image_generation.openrouter = pconf
+            
+            save_config(config)
+            
+            return f"✅ API key saved for {provider}!\n\nYou can now use '{provider}' for image generation."
+            
+        except Exception as e:
+            logger.error(f"Failed to save API key: {e}")
+            return f"⚠️ API key set for this session, but failed to save to config: {e}"
+    
     def _format_result(self, result: GeneratedImage) -> str:
         """Format the generation result for display."""
         cost_str = f" (${result.cost:.3f})" if result.cost and result.cost > 0 else " (free)"
@@ -701,6 +908,11 @@ Examples:
             "pollinations": [
                 "flux (default, high quality)",
                 "turbo (faster, lower quality)",
+            ],
+            "gemini": [
+                "imagen-3.0-generate-002 (latest, high quality)",
+                "imagen-3.0-generate-001 (stable)",
+                "imagen-3.0-fast-generate-001 (faster generation)",
             ],
             "openrouter": [
                 "black-forest-labs/flux.2-pro (best quality)",
