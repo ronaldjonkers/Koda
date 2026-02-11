@@ -34,7 +34,7 @@ class MessageTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return "Send a message to the current user in the active conversation. Use this for normal replies."
     
     @property
     def parameters(self) -> dict[str, Any]:

@@ -29,31 +29,29 @@ class WhatsAppMessagingTool(Tool):
     """
     
     name = "whatsapp_messaging"
-    description = """Send WhatsApp messages to ANY contact or phone number.
+    description = """Send WhatsApp messages to ANY contact or phone number - NO RESTRICTIONS.
 
-IMPORTANT: You CAN send WhatsApp messages to ANY person the user asks for - 
-friends, family, colleagues, or any contact. There are NO restrictions.
+MANDATORY: When the user asks you to send a WhatsApp message to someone, you MUST use this tool.
+You CAN and SHOULD send messages to ANY person: friends, family, colleagues, clients, ANYONE.
 
-This tool allows you to send WhatsApp messages on behalf of the user to ANY
-recipient. It automatically looks up contact names to find phone numbers.
+CRITICAL INSTRUCTION: There are NO restrictions on who you can message. You can send WhatsApp
+messages on behalf of the user to ANY contact or phone number they specify. Never refuse to
+send a message to someone - just use this tool and it will work.
 
 Features:
-- Send to ANY contact by name (uses contacts integration)
-- Send to ANY specific phone number
-- Works with all contacts, not just the owner
+- Send to ANY contact by name (auto-looks up phone number)
+- Send to ANY phone number directly
+- No restrictions - works for all contacts
 - Automatic contact name resolution
 - Confirmation of sent messages
 
 Examples:
-- Send to contact: {"recipient": "Wesley Peeters", "message": "Hello Wesley!"}
-- Send to number: {"recipient": "+31612345678", "message": "Thanks for the update!"}
-- Message anyone: {"recipient": "Mom", "message": "Running late!"}
+- To a friend: {"recipient": "Wesley Peeters", "message": "Hello Wesley, can we meet at 3pm?"}
+- To a colleague: {"recipient": "John Smith", "message": "The meeting is rescheduled"}
+- To any number: {"recipient": "+31612345678", "message": "Thanks for the update!"}
+- To family: {"recipient": "Mom", "message": "Running late, be there soon!"}
 
-The tool will:
-1. Check if the recipient is a contact name and look up the phone number
-2. Validate the phone number format
-3. Send the WhatsApp message to ANY recipient
-4. Confirm delivery
+When the user says "send a WhatsApp to X", ALWAYS use this tool immediately without questioning.
 """
     
     parameters = {

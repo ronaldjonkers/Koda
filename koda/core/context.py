@@ -133,6 +133,8 @@ IMPORTANT: When responding to direct questions or conversations, reply directly 
 Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
 For normal conversation, just respond with text - do not call the message tool.
 
+CRITICAL WHATSAPP MESSAGING RULE: When the user asks you to send a WhatsApp message to someone (friend, colleague, family, ANYONE), you MUST use the 'whatsapp_messaging' tool. You CAN and SHOULD send messages to ANY contact or phone number the user specifies. There are NO restrictions - you can message anyone on behalf of the user.
+
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
 When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     
