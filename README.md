@@ -12,13 +12,25 @@
 
 ## ✨ Key Features
 
+### 🤖 Executive Secretary (NEW)
+Koda now functions as a true executive secretary that anticipates your needs:
+
+- 🔔 **Proactive Reminders** - Automatic notifications before meetings, birthdays, and important events
+- 🌅 **Morning Briefings** - Daily overview of your agenda, birthdays, and important emails
+- 🧠 **Smart Conflict Detection** - Alerts you before scheduling overlapping meetings
+- 🗣️ **Natural Language** - Speak naturally: "What's my day look like?" or "Remind me to call mom tomorrow"
+- 📊 **Email Prioritization** - Automatically identifies and flags important emails
+- 🎂 **Special Occasions** - Remembers birthdays, anniversaries, and suggests greetings
+- ⚡ **Autonomous Actions** - AI finds the best way to accomplish your requests
+
 ### Executive Management
-- 📅 **Calendar Management** - Google Calendar, Microsoft Exchange & CalDAV integration (view, create, update, delete)
-- 📧 **Email Assistant** - Read, search, and send emails via Gmail or Exchange
+- 📅 **Calendar Management** - Google Calendar (including shared calendars!), Microsoft Exchange & CalDAV
+- 📧 **Email Assistant** - Read, search, and send emails via Gmail or Exchange with smart prioritization
 - 👥 **Contact Intelligence** - Access iCloud/macOS contacts with birthday tracking
-- 🔔 **Active Reminders** - Webhook and email-based reminder system
+- 🔔 **Active Reminders** - Webhook, email, and WhatsApp-based reminder system
 - 📱 **iMessage/SMS** - Send and read messages via macOS Messages app
 - 🔗 **Google Meet** - Create instant Meet links, auto-add to any calendar type
+- 🏢 **Shared Calendars** - Full support for Google Workspace shared calendars
 
 ### Technical Powerhouse
 - 🛠️ **Script Automation** - Generate and execute Python, Bash, and Node.js scripts
@@ -519,7 +531,65 @@ Works with any CalDAV-compatible server:
 }
 ```
 
-## � Google Meet
+## 🔧 Google Workspace (Enhanced)
+
+The Google Workspace integration has been significantly improved for reliability and shared calendar support:
+
+### Setup
+
+```bash
+# Interactive setup
+koda setup-google
+
+# Check status
+koda setup-google --status
+
+# Force token refresh if connection issues
+koda setup-google --refresh
+```
+
+### Shared Calendar Support
+
+All shared calendars are automatically discovered and accessible:
+
+```bash
+# List all calendars including shared ones
+koda agent -m "Show my calendars"
+
+# Events from shared calendars appear in listings
+koda agent -m "What's on today?"
+```
+
+### Connection Stability
+
+The new implementation includes:
+- **Automatic token refresh** - No more "connection lost" errors
+- **Persistent state tracking** - Monitors connection health
+- **Retry logic** - Automatically retries failed requests
+- **Caching** - Reduces API calls while keeping data fresh
+
+### Troubleshooting
+
+If Google Workspace stops working:
+
+```bash
+# 1. Check connection status
+koda setup-google --status
+
+# 2. Force token refresh
+koda setup-google --refresh
+
+# 3. If issues persist, reset and re-authorize
+koda setup-google --reset
+koda setup-google
+```
+
+Common issues and solutions:
+- **"Token expired"** → Run `koda setup-google --refresh`
+- **"Shared calendars not showing"** → The service auto-discovers them; check with `koda agent -m "list calendars"`
+- **"Connection lost"** → Token is auto-refreshed; if persistent, re-authorize
+
+## 📹 Google Meet
 
 Create instant Google Meet links or add them to calendar events.
 
@@ -900,7 +970,109 @@ koda agent -m "Find Python developers in Amsterdam on LinkedIn"
 
 > **Note:** LinkedIn automation uses an unofficial API. Use responsibly and respect LinkedIn's terms of service.
 
-## � Contacts & Birthdays
+## 🤖 Executive Secretary Features
+
+Koda now operates as a true executive secretary that anticipates your needs and manages your professional life proactively.
+
+### 🔔 Proactive Reminders
+
+The proactive assistant continuously monitors your calendars and sends timely reminders:
+
+```bash
+# The assistant automatically sends reminders before meetings
+# Configure in your gateway startup or via WhatsApp commands:
+
+/remind me 15 minutes before meetings
+/brief me every morning at 8am
+```
+
+**Features:**
+- Automatic meeting reminders (15 minutes before by default)
+- Daily morning briefings with agenda and birthdays
+- Smart quiet hours (22:00 - 07:00) - no notifications during rest
+- Snooze functionality - reply "snooze 10" to delay reminders
+
+### 🗣️ Natural Language Commands
+
+Speak naturally - no need to learn specific syntax:
+
+```bash
+# These all work:
+koda agent -m "What's my day look like?"
+koda agent -m "Remind me to call mom tomorrow at 2pm"
+koda agent -m "Do I have any meetings this week?"
+koda agent -m "Wish John happy birthday"
+koda agent -m "What birthdays are coming up?"
+koda agent -m "Morning briefing"
+```
+
+The AI understands context and intent, then takes the appropriate actions.
+
+### 📅 Shared Calendar Support
+
+Koda now fully supports Google Workspace shared calendars:
+
+```bash
+# All shared calendars are automatically discovered
+koda agent -m "List my calendars"
+
+# Create events on shared calendars
+koda agent -m "Create a meeting on the Team Calendar for tomorrow 2pm"
+
+# View events from all calendars including shared ones
+koda agent -m "What's on the schedule this week?"
+```
+
+### 📊 Email Prioritization
+
+Smart email filtering identifies important messages:
+
+```bash
+# Get only high-priority unread emails
+koda agent -m "Show me important emails"
+
+# Or ask naturally
+koda agent -m "Do I have any urgent emails?"
+```
+
+**Priority Signals:**
+- Unread status
+- "Important" label
+- Keywords in subject (meeting, urgent, deadline, etc.)
+- External senders (non-gmail domains)
+- Recent arrival (within 24 hours)
+
+### ⚡ Autonomous Problem Solving
+
+Koda now finds the best way to accomplish your requests:
+
+```bash
+# Instead of specifying exact steps:
+"Find John's contact info and send him a meeting invite for tomorrow"
+
+# Koda will:
+# 1. Search contacts for John
+# 2. Find his email
+# 3. Create a calendar event
+# 4. Send him an invitation
+```
+
+### 🎂 Special Occasions
+
+Never miss an important date:
+
+```bash
+# Check upcoming birthdays
+koda agent -m "Any birthdays coming up?"
+
+# Get reminded automatically
+# (Configured in proactive settings)
+
+# Daily morning briefing includes birthdays
+koda agent -m "Morning briefing"
+```
+
+## 🎂 Contacts & Birthdays
 
 Koda accesses your macOS/iCloud contacts for:
 
