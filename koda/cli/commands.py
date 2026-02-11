@@ -1116,16 +1116,18 @@ def gateway(
             send_callback=send_proactive_message
         )
         
-        await proactive_service.start()
         console.print(f"[green]✓[/green] Proactive assistant: enabled (reminders, birthdays, briefings)")
     except Exception as e:
         logger.warning(f"Proactive reminder service not started: {e}")
+        proactive_service = None
     
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
             await reminder_service.start()
+            if proactive_service:
+                await proactive_service.start()
             
             tasks = [agent.run(), channels.start_all()]
             if webhook_server:
