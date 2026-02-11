@@ -1329,11 +1329,11 @@ def gateway(
     proactive_service = None
     try:
         from koda.services.proactive_reminder import (
-            ProactiveReminderService, ReminderConfig
+            ProactiveReminderService, ProactiveReminderConfig
         )
         
         # Create proactive reminder config
-        proactive_config = ReminderConfig(
+        proactive_config = ProactiveReminderConfig(
             calendar_reminders_enabled=True,
             calendar_default_minutes_before=15,
             calendar_morning_check_time="08:00",
