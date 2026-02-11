@@ -38,6 +38,7 @@ from koda.core.tools.image_generation import ImageGenerationTool, APIKeyMissingE
 from koda.core.tools.public_events import PublicEventsTool
 from koda.core.tools.file_sender import FileSenderTool
 from koda.core.tools.document_reader import DocumentReaderTool
+from koda.core.tools.whatsapp_messaging import WhatsAppMessagingTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -281,12 +282,23 @@ class AgentLoop:
         
         # Document Reader (for reading PDFs, Word docs, etc. sent via WhatsApp)
         self.tools.register(DocumentReaderTool())
+        
+        # WhatsApp Messaging (for sending messages to contacts)
+        self.whatsapp_msg_tool = WhatsAppMessagingTool(
+            bus=bus,
+            owner_phone=getattr(full_config.channels.whatsapp, 'owner_phone', None) if full_config else None
+        )
+        self.tools.register(self.whatsapp_msg_tool)
     
     def set_whatsapp_channel(self, channel):
-        """Set the WhatsApp channel for file sending."""
+        """Set the WhatsApp channel for file sending and messaging."""
         if hasattr(self, 'file_sender_tool'):
             self.file_sender_tool.whatsapp = channel
             logger.info("✅ File sender connected to WhatsApp channel")
+        
+        if hasattr(self, 'whatsapp_msg_tool'):
+            self.whatsapp_msg_tool.set_whatsapp_channel(channel)
+            logger.info("✅ WhatsApp messaging connected to WhatsApp channel")
     
     async def _on_image_generated(self, result):
         """Callback when an image is generated - sends via WhatsApp if channel available."""
