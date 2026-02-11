@@ -11,6 +11,12 @@ interface SendCommand {
   text: string;
 }
 
+interface TypingCommand {
+  type: 'typing';
+  to: string;
+  isTyping: boolean;
+}
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -67,9 +73,13 @@ export class BridgeServer {
     await this.wa.connect();
   }
 
-  private async handleCommand(cmd: SendCommand): Promise<void> {
-    if (cmd.type === 'send' && this.wa) {
+  private async handleCommand(cmd: SendCommand | TypingCommand): Promise<void> {
+    if (!this.wa) return;
+    
+    if (cmd.type === 'send') {
       await this.wa.sendMessage(cmd.to, cmd.text);
+    } else if (cmd.type === 'typing') {
+      await this.wa.sendTypingIndicator(cmd.to, cmd.isTyping);
     }
   }
 

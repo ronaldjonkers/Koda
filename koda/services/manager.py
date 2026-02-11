@@ -125,7 +125,15 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
-                        await channel.send(msg)
+                        # Check for typing indicator marker
+                        if msg.metadata.get("typing") is not None:
+                            # Typing indicator message
+                            if hasattr(channel, 'set_typing_indicator'):
+                                is_typing = msg.metadata.get("typing", False)
+                                await channel.set_typing_indicator(msg.chat_id, is_typing)
+                        else:
+                            # Normal message
+                            await channel.send(msg)
                     except Exception as e:
                         logger.error(f"Error sending to {msg.channel}: {e}")
                 else:

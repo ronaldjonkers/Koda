@@ -347,6 +347,40 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
     
+    async def _keep_typing_active(self, chat_id: str, interval: float = 5.0) -> None:
+        """Keep typing indicator active by sending periodic updates.
+        
+        WhatsApp typing indicators expire after a few seconds, so we need
+        to refresh them periodically while the AI is processing.
+        """
+        from koda.messaging.events import OutboundMessage
+        
+        while True:
+            try:
+                # Send typing indicator via the bus
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel="whatsapp",
+                    chat_id=chat_id,
+                    content="__TYPING__",  # Special marker for typing indicator
+                    metadata={"typing": True}
+                ))
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                # Send stopped typing indicator
+                try:
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel="whatsapp",
+                        chat_id=chat_id,
+                        content="__TYPING__",
+                        metadata={"typing": False}
+                    ))
+                except:
+                    pass
+                break
+            except Exception as e:
+                logger.debug(f"Typing indicator error: {e}")
+                await asyncio.sleep(interval)
+    
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a single inbound message.
@@ -363,6 +397,11 @@ class AgentLoop:
             return await self._process_system_message(msg)
         
         logger.info(f"🤖 Processing message from {msg.channel}:{msg.sender_id}: {msg.content[:80]}{'...' if len(msg.content) > 80 else ''}")
+        
+        # Start typing indicator for WhatsApp
+        typing_task = None
+        if msg.channel == "whatsapp":
+            typing_task = asyncio.create_task(self._keep_typing_active(msg.chat_id))
         
         # Trigger message received hook
         await trigger_hook_async(create_hook_event(
@@ -443,6 +482,14 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+        
+        # Stop typing indicator
+        if typing_task:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
         
         # Save to session
         session.add_message("user", msg.content)

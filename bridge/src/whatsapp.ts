@@ -253,6 +253,26 @@ export class WhatsAppClient {
     }
   }
 
+  async sendTypingIndicator(to: string, isTyping: boolean): Promise<void> {
+    if (!this.sock) {
+      return;
+    }
+
+    try {
+      // Send typing state: 'composing' = typing, 'paused' = stopped typing
+      const state = isTyping ? 'composing' : 'paused';
+      await this.sock.sendPresenceUpdate(state, to);
+      
+      // If typing, also set online presence
+      if (isTyping) {
+        await this.sock.sendPresenceUpdate('available');
+      }
+    } catch (err) {
+      // Ignore typing errors - they're not critical
+      console.debug('Typing indicator error (non-critical):', err);
+    }
+  }
+
   async disconnect(): Promise<void> {
     if (this.sock) {
       this.sock.end(undefined);

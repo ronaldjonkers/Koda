@@ -125,6 +125,23 @@ class WhatsAppChannel(BaseChannel):
         except Exception as e:
             logger.error(f"❌ Error sending WhatsApp message: {e}")
     
+    async def set_typing_indicator(self, chat_id: str, is_typing: bool = True) -> None:
+        """Set typing indicator (composing/paused) for a chat."""
+        if not self._ws or not self._connected:
+            return
+        
+        try:
+            payload = {
+                "type": "typing",
+                "to": chat_id,
+                "isTyping": is_typing
+            }
+            await self._ws.send(json.dumps(payload))
+            status = "typing" if is_typing else "stopped"
+            logger.debug(f"📝 Typing indicator {status} for {chat_id[:20]}...")
+        except Exception as e:
+            logger.debug(f"Typing indicator error (non-critical): {e}")
+    
     def _load_contact_rules(self) -> None:
         """Load contact rules into a lookup dict."""
         self._contact_rules = {}
