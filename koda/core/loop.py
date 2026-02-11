@@ -583,7 +583,7 @@ I can generate images for you! Choose a provider:
 - Filename: {media_filename}
 - Path: {media_path}
 
-**IMPORTANT:** Use the `document_reader` tool to read this file and answer the user's question about its content. Call document_reader with path="{media_path}""""
+**IMPORTANT:** Use the `document_reader` tool to read this file and answer the user's question about its content. Call document_reader with path=\"{media_path}\""""
                 
                 # For images that are not in msg.media yet
                 elif media_type == "image" and not msg.media:
