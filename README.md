@@ -40,6 +40,22 @@ Koda now functions as a true executive secretary that anticipates your needs:
 - 🌐 **Web Fetch** - Extract content from any URL using Trafilatura
 - 💻 **Shell Execution** - Direct system command execution
 
+### 🎨 Image Generation
+Create stunning AI-generated images with multiple provider support:
+
+| Provider | Cost | Quality | Setup |
+|----------|------|---------|-------|
+| **Pollinations.ai** | 🆓 Free | Good | No API key needed |
+| **Google Gemini (Imagen)** | 💰 ~$0.04/image | Excellent | [Get API Key](https://aistudio.google.com/app/apikey) |
+| **OpenRouter** | 💰 Variable | Good | OpenRouter API key |
+| **Stability AI** | 💰 Variable | Excellent | Stability API key |
+
+**Features:**
+- 🖼️ Multiple aspect ratios (1:1, 16:9, 9:16, etc.)
+- 🔄 Auto-fallback between providers
+- 💾 Automatic download and organization
+- 📱 Share directly via WhatsApp
+
 ### Communication Hub
 - � **Messaging Integration** - WhatsApp & Telegram bot capabilities
 - 🌐 **Webhook API** - REST API for external integrations
@@ -214,6 +230,29 @@ koda config webhook      # Webhook API settings
 koda config --show       # Show current configuration
 koda config --test       # Test all connections
 ```
+
+### Image Generation Setup
+
+Configure AI image generation providers:
+
+```bash
+# Free option - no API key needed
+koda setup-image --provider pollinations --default
+
+# Google Gemini Imagen (Nana Banana) - high quality
+koda setup-image --provider gemini --api-key YOUR_KEY --default
+
+# Other providers
+koda setup-image --provider openrouter --api-key sk-or-xxx --default
+koda setup-image --provider stability_ai --api-key sk-xxx --default
+```
+
+**Getting API Keys:**
+- **Google Gemini (Nana Banana)**: https://aistudio.google.com/app/apikey (~$0.04/image)
+- **OpenRouter**: https://openrouter.ai/keys (various models)
+- **Stability AI**: https://platform.stability.ai/ (high quality)
+
+**Usage:** Once configured, simply ask: "Generate an image of a sunset over mountains" or "Create a picture of a cat wearing a hat"
 
 ### Cron Scheduler
 
@@ -1177,6 +1216,25 @@ Supported languages:
     "telegram": { "enabled": true, "token": "...", "allowFrom": ["..."] },
     "whatsapp": { "enabled": true, "allowFrom": ["+31..."] }
   },
+  "tools": {
+    "image_generation": {
+      "default_provider": "pollinations",
+      "pollinations": { "enabled": true },
+      "gemini": { 
+        "enabled": true, 
+        "api_key": "YOUR_GOOGLE_API_KEY",
+        "default_model": "imagen-3.0-generate-002"
+      },
+      "openrouter": { 
+        "enabled": true, 
+        "api_key": "sk-or-v1-xxx" 
+      },
+      "stability_ai": { 
+        "enabled": true, 
+        "api_key": "YOUR_STABILITY_KEY" 
+      }
+    }
+  },
   "integrations": {
     "google": { "enabled": true },
     "exchange": { "enabled": false },
@@ -1224,7 +1282,7 @@ Supported languages:
 | `koda cron list` | List scheduled tasks |
 | `koda setup-proxy` | Generate reverse proxy config for external access |
 
-**Config sections:** `assistant`, `provider`, `calendar`, `email`, `bot-email`, `channels`, `webhook`, `exchange`, `caldav`, `imap`, `google`, `telegram`, `whatsapp`, `whatsapp-contacts`
+**Config sections:** `assistant`, `provider`, `calendar`, `email`, `bot-email`, `channels`, `webhook`, `exchange`, `caldav`, `imap`, `google`, `telegram`, `whatsapp`, `whatsapp-contacts`, `setup-image`
 
 ## 🐳 Docker
 
@@ -1259,6 +1317,7 @@ koda/
 │       ├── script.py       # Script generation/execution
 │       ├── shell.py        # Shell command execution
 │       ├── web.py          # Web search & fetch
+│       ├── image_generation.py  # AI image generation (multi-provider)
 │       └── filesystem.py   # File operations
 ├── services/               # External service integrations
 │   ├── telegram.py         # Telegram channel
