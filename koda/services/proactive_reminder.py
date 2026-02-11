@@ -28,12 +28,10 @@ class ReminderType(str, Enum):
     """Types of proactive reminders."""
     CALENDAR = "calendar"           # Upcoming appointments
     BIRTHDAY = "birthday"           # Birthday reminders
-    ANNIVERSARY = "anniversary"     # Special occasions
-    EMAIL = "email"                 # Important unread emails
-    TASK = "task"                   # Task deadlines
-    CUSTOM = "custom"               # User-defined reminders
+    EMAIL = "email"                 # Important emails
+    TASK = "task"                   # Task/deadline reminders
     MORNING_BRIEFING = "morning"    # Daily morning summary
-    EVENING_WRAPUP = "evening"      # Daily evening summary
+    CUSTOM = "custom"               # User-defined reminders
 
 
 class ReminderPriority(str, Enum):
@@ -46,48 +44,43 @@ class ReminderPriority(str, Enum):
 
 @dataclass
 class ProactiveReminder:
-    """A proactive reminder to be sent to the user."""
+    """A proactive reminder."""
     id: str
     type: ReminderType
     title: str
     message: str
     scheduled_time: datetime
-    priority: ReminderPriority
-    channel: str  # whatsapp, telegram, email
-    recipient: str
+    priority: ReminderPriority = ReminderPriority.NORMAL
+    channel: str = "whatsapp"  # whatsapp, telegram, email
+    recipient: str = ""        # phone number or email
     sent: bool = False
     sent_at: Optional[datetime] = None
-    related_event_id: Optional[str] = None
     snooze_until: Optional[datetime] = None
+    related_event_id: Optional[str] = None  # For calendar reminders
     metadata: dict = field(default_factory=dict)
 
 
 @dataclass
-class ReminderConfig:
-    """Configuration for proactive reminders."""
+class ProactiveReminderConfig:
+    """Configuration for the proactive reminder service."""
     # Calendar reminders
     calendar_reminders_enabled: bool = True
     calendar_default_minutes_before: int = 15
-    calendar_morning_check_time: str = "08:00"  # Daily briefing time
+    calendar_morning_check_time: str = "08:00"
     
     # Birthday reminders
     birthday_reminders_enabled: bool = True
-    birthday_days_before: int = 1  # How many days before to remind
+    birthday_days_before: int = 1
     birthday_send_time: str = "09:00"
     
     # Special occasions
     special_occasions_enabled: bool = True
-    occasions_to_track: list[str] = field(default_factory=lambda: [
-        "valentines", "mothers_day", "fathers_day", 
-        "christmas", "new_year", "anniversary"
-    ])
     
-    # Email monitoring
+    # Email digest
     email_digest_enabled: bool = True
     email_digest_time: str = "08:30"
-    email_high_priority_only: bool = True
     
-    # Channels
+    # Default settings
     default_channel: str = "whatsapp"
     default_recipient: str = ""
     
@@ -99,34 +92,32 @@ class ReminderConfig:
 
 class ProactiveReminderService:
     """
-    Service that sends proactive reminders and maintains assistant memory.
+    Proactive reminder service that sends notifications before events.
     
-    This is the core of the "executive secretary" functionality - it:
-    1. Scans calendars for upcoming events and sends reminders
-    2. Checks for birthdays and special occasions
-    3. Monitors important emails
-    4. Provides daily briefings
-    5. Learns user patterns and preferences
+    This is like having an executive assistant who:
+    - Reminds you of upcoming meetings
+    - Alerts you to birthdays
+    - Gives you a morning briefing
+    - Flags important emails
     """
     
     def __init__(
         self,
-        config: ReminderConfig | None = None,
-        storage_path: Path | None = None,
-        send_callback: Callable[[str, str, str], asyncio.Future] | None = None
+        config: ProactiveReminderConfig,
+        send_callback: Callable[[str, str, str], Any],
+        storage_path: Optional[Path] = None
     ):
-        self.config = config or ReminderConfig()
-        self.storage_path = storage_path or Path.home() / ".koda" / "proactive_reminders.json"
+        self.config = config
         self.send_callback = send_callback
+        self.storage_path = storage_path or Path.home() / ".koda" / "proactive_reminders.json"
         
         self._reminders: list[ProactiveReminder] = []
-        self._running = False
-        self._task: asyncio.Task | None = None
         self._last_check: dict[str, datetime] = {}
+        self._user_preferences: dict = {}
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
         
-        # User preferences learned over time
-        self._user_preferences: dict[str, Any] = {}
-        
+        # Load saved reminders
         self._load_reminders()
     
     def _load_reminders(self) -> None:
@@ -135,18 +126,35 @@ class ProactiveReminderService:
             try:
                 data = json.loads(self.storage_path.read_text())
                 for r in data.get("reminders", []):
+                    # Parse datetimes and ensure timezone-aware
+                    scheduled_time = datetime.fromisoformat(r["scheduled_time"])
+                    if scheduled_time.tzinfo is None:
+                        scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+                    
+                    sent_at = None
+                    if r.get("sent_at"):
+                        sent_at = datetime.fromisoformat(r["sent_at"])
+                        if sent_at.tzinfo is None:
+                            sent_at = sent_at.replace(tzinfo=timezone.utc)
+                    
+                    snooze_until = None
+                    if r.get("snooze_until"):
+                        snooze_until = datetime.fromisoformat(r["snooze_until"])
+                        if snooze_until.tzinfo is None:
+                            snooze_until = snooze_until.replace(tzinfo=timezone.utc)
+                    
                     self._reminders.append(ProactiveReminder(
                         id=r["id"],
                         type=ReminderType(r["type"]),
                         title=r["title"],
                         message=r["message"],
-                        scheduled_time=datetime.fromisoformat(r["scheduled_time"]),
+                        scheduled_time=scheduled_time,
                         priority=ReminderPriority(r["priority"]),
                         channel=r["channel"],
                         recipient=r["recipient"],
                         sent=r.get("sent", False),
-                        sent_at=datetime.fromisoformat(r["sent_at"]) if r.get("sent_at") else None,
-                        snooze_until=datetime.fromisoformat(r["snooze_until"]) if r.get("snooze_until") else None,
+                        sent_at=sent_at,
+                        snooze_until=snooze_until,
                         metadata=r.get("metadata", {})
                     ))
                 self._user_preferences = data.get("preferences", {})
@@ -182,46 +190,17 @@ class ProactiveReminderService:
         except Exception as e:
             logger.error(f"Failed to save reminders: {e}")
     
-    def _is_quiet_hours(self, check_time: datetime | None = None) -> bool:
-        """Check if current time is within quiet hours."""
-        if not self.config.respect_quiet_hours:
-            return False
-        
-        now = check_time or datetime.now(timezone.utc)
-        current_time = now.strftime("%H:%M")
-        
-        quiet_start = self.config.quiet_hours_start
-        quiet_end = self.config.quiet_hours_end
-        
-        if quiet_start <= quiet_end:
-            # Normal case (e.g., 22:00 to 07:00 doesn't apply here)
-            return quiet_start <= current_time <= quiet_end
-        else:
-            # Wraps around midnight (e.g., 22:00 to 07:00)
-            return current_time >= quiet_start or current_time <= quiet_end
-    
-    def _get_next_non_quiet_time(self) -> datetime:
-        """Get the next time outside quiet hours."""
-        now = datetime.now(timezone.utc)
-        quiet_end = datetime.strptime(self.config.quiet_hours_end, "%H:%M").time()
-        
-        next_time = now.replace(hour=quiet_end.hour, minute=quiet_end.minute, second=0)
-        if next_time <= now:
-            next_time += timedelta(days=1)
-        
-        return next_time
-    
     async def start(self) -> None:
-        """Start the proactive reminder service."""
+        """Start the reminder service."""
         if self._running:
             return
         
         self._running = True
-        self._task = asyncio.create_task(self._run_loop())
+        self._task = asyncio.create_task(self._reminder_loop())
         logger.info("✅ Proactive reminder service started")
     
     async def stop(self) -> None:
-        """Stop the proactive reminder service."""
+        """Stop the reminder service."""
         self._running = False
         if self._task:
             self._task.cancel()
@@ -229,10 +208,11 @@ class ProactiveReminderService:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        self._save_reminders()
         logger.info("Proactive reminder service stopped")
     
-    async def _run_loop(self) -> None:
-        """Main loop that checks and sends reminders."""
+    async def _reminder_loop(self) -> None:
+        """Main reminder loop - checks and sends reminders."""
         while self._running:
             try:
                 await self._check_and_send_reminders()
@@ -241,7 +221,9 @@ class ProactiveReminderService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                import traceback
                 logger.error(f"Error in reminder loop: {e}")
+                logger.debug(f"Reminder loop traceback: {traceback.format_exc()}")
                 await asyncio.sleep(60)
     
     async def _check_and_send_reminders(self) -> None:
@@ -252,10 +234,20 @@ class ProactiveReminderService:
             if reminder.sent:
                 continue
             
-            if reminder.snooze_until and now < reminder.snooze_until:
+            # Ensure snooze_until is timezone-aware for comparison
+            snooze_until = reminder.snooze_until
+            if snooze_until and snooze_until.tzinfo is None:
+                snooze_until = snooze_until.replace(tzinfo=timezone.utc)
+            
+            if snooze_until and now < snooze_until:
                 continue
             
-            if now >= reminder.scheduled_time:
+            # Ensure scheduled_time is timezone-aware for comparison
+            scheduled_time = reminder.scheduled_time
+            if scheduled_time.tzinfo is None:
+                scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+            
+            if now >= scheduled_time:
                 # Check quiet hours - delay if needed
                 if self._is_quiet_hours(now):
                     next_valid = self._get_next_non_quiet_time()
@@ -310,6 +302,11 @@ class ProactiveReminderService:
             self._last_check[check_type] = datetime.now(timezone.utc)
             return True
         
+        # Ensure last check time is timezone-aware
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+            self._last_check[check_type] = last
+        
         if datetime.now(timezone.utc) - last >= timedelta(minutes=minutes):
             self._last_check[check_type] = datetime.now(timezone.utc)
             return True
@@ -322,7 +319,6 @@ class ProactiveReminderService:
             return
         
         try:
-            from datetime import timezone
             from koda.integrations.google_workspace import GoogleWorkspaceClient
             
             client = GoogleWorkspaceClient()
@@ -411,21 +407,14 @@ class ProactiveReminderService:
         ]
         
         if hasattr(event, 'start') and event.start:
-            time_str = event.start.strftime("%H:%M") if hasattr(event.start, 'strftime') else str(event.start)
+            time_str = event.start.strftime("%H:%M") if hasattr(event.start, 'strftime') else ""
             lines.append(f"🕐 {time_str}")
         
         if hasattr(event, 'location') and event.location:
             lines.append(f"📍 {event.location}")
         
-        if hasattr(event, 'meet_link') and event.meet_link:
-            lines.append(f"🔗 {event.meet_link}")
-        
-        if hasattr(event, 'description') and event.description:
-            # Truncate long descriptions
-            desc = event.description[:200] + "..." if len(event.description) > 200 else event.description
-            lines.append(f"\n📝 {desc}")
-        
-        lines.append("\n_Reageer met 'snooze 5' om over 5 minuten opnieuw te herinneren_")
+        lines.append("")
+        lines.append("_Ik stuur je zo meteen een reminder voor deze afspraak_ ⏰")
         
         return "\n".join(lines)
     
@@ -467,7 +456,7 @@ class ProactiveReminderService:
                     )
                     
                     reminder = ProactiveReminder(
-                        id=f"bday_{name}_{int(scheduled.timestamp())}",
+                        id=f"bday_{name}_{date.today().year}",
                         type=ReminderType.BIRTHDAY,
                         title=f"Verjaardag: {name}",
                         message=message,
@@ -475,14 +464,13 @@ class ProactiveReminderService:
                         priority=ReminderPriority.NORMAL,
                         channel=self.config.default_channel,
                         recipient=self.config.default_recipient,
-                        metadata={"contact_name": name, "days_until": days_until}
+                        metadata={"contact_name": name, "age": age}
                     )
                     
                     self._reminders.append(reminder)
+                    self._save_reminders()
                     logger.info(f"Scheduled birthday reminder for {name}")
-            
-            self._save_reminders()
-            
+                    
         except Exception as e:
             logger.error(f"Error scanning birthdays: {e}")
     
@@ -516,8 +504,8 @@ class ProactiveReminderService:
             )
             
             self._reminders.append(reminder)
-            logger.info(f"Scheduled morning briefing for {scheduled}")
             self._save_reminders()
+            logger.info(f"Scheduled morning briefing for {scheduled}")
             
         except Exception as e:
             logger.error(f"Error scheduling morning briefing: {e}")
@@ -555,41 +543,68 @@ class ProactiveReminderService:
         try:
             from koda.integrations.icloud_contacts import ICloudContactsClient
             client = ICloudContactsClient(use_local=True)
-            birthdays = client.get_birthdays_on_date(date.today())
+            birthdays = client.get_birthdays_on_date()
             if birthdays:
-                lines.append("🎂 *Vandaag jarig:*")
+                lines.append("🎂 *Verjaardagen vandaag:*")
                 for b in birthdays:
-                    age = b.get("age", "")
-                    age_text = f" ({age})" if age else ""
-                    lines.append(f"  • {b['name']}{age_text}")
+                    age = b.get("age")
+                    age_str = f" ({age})" if age else ""
+                    lines.append(f"  • {b.get('name', 'Unknown')}{age_str}")
                 lines.append("")
         except Exception as e:
             logger.debug(f"Could not get birthdays: {e}")
         
-        # Weather (placeholder)
-        lines.append("☀️ _Fijne dag gewenst!_")
+        lines.append("Fijne dag gewenst! ☀️")
         
         return "\n".join(lines)
     
-    def add_custom_reminder(
-        self,
-        title: str,
-        message: str,
-        when: datetime,
-        priority: ReminderPriority = ReminderPriority.NORMAL,
-        channel: str | None = None,
-        recipient: str | None = None
-    ) -> str:
+    def _is_quiet_hours(self, now: datetime) -> bool:
+        """Check if current time is within quiet hours."""
+        if not self.config.respect_quiet_hours:
+            return False
+        
+        current_time = now.time()
+        quiet_start = datetime.strptime(self.config.quiet_hours_start, "%H:%M").time()
+        quiet_end = datetime.strptime(self.config.quiet_hours_end, "%H:%M").time()
+        
+        if quiet_start <= quiet_end:
+            # Same day (e.g., 22:00 to 07:00 doesn't fit this pattern)
+            return quiet_start <= current_time <= quiet_end
+        else:
+            # Overnight (e.g., 22:00 to 07:00)
+            return current_time >= quiet_start or current_time <= quiet_end
+    
+    def _get_next_non_quiet_time(self) -> datetime:
+        """Get the next time outside of quiet hours."""
+        now = datetime.now(timezone.utc)
+        quiet_end = datetime.strptime(self.config.quiet_hours_end, "%H:%M").time()
+        
+        # Schedule for quiet hours end time today or tomorrow
+        next_time = datetime.combine(now.date(), quiet_end).replace(tzinfo=timezone.utc)
+        if next_time <= now:
+            next_time += timedelta(days=1)
+        
+        return next_time
+    
+    # Public API methods
+    
+    def add_reminder(self, title: str, message: str, when: datetime, 
+                     reminder_type: ReminderType = ReminderType.CUSTOM,
+                     priority: ReminderPriority = ReminderPriority.NORMAL) -> str:
         """Add a custom reminder."""
+        # Ensure when is timezone-aware
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        
         reminder = ProactiveReminder(
             id=f"custom_{int(datetime.now(timezone.utc).timestamp())}_{hash(title) % 10000}",
-            type=ReminderType.CUSTOM,
+            type=reminder_type,
             title=title,
             message=message,
             scheduled_time=when,
             priority=priority,
-            channel=channel or self.config.default_channel,
-            recipient=recipient or self.config.default_recipient
+            channel=self.config.default_channel,
+            recipient=self.config.default_recipient
         )
         
         self._reminders.append(reminder)
