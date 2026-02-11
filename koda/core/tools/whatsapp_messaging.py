@@ -13,12 +13,14 @@ import re
 
 
 class WhatsAppMessagingTool(Tool):
-    """Tool for sending WhatsApp messages to contacts.
+    """Tool for sending WhatsApp messages to any contact or phone number.
     
-    This tool allows the user (owner) to send WhatsApp messages through the assistant.
-    It can resolve contact names to phone numbers using the contacts integration.
+    This tool allows sending WhatsApp messages to ANY contact or phone number,
+    not just the owner. It can resolve contact names to phone numbers using 
+    the contacts integration.
     
-    Security: Only the owner can use this tool to prevent unauthorized messaging.
+    The assistant CAN and SHOULD use this tool to send messages to any person
+    the user asks for, including friends, family, colleagues, or any contact.
     
     Examples:
     - Send to contact by name: {"recipient": "John Doe", "message": "Hello John!"}
@@ -27,26 +29,30 @@ class WhatsAppMessagingTool(Tool):
     """
     
     name = "whatsapp_messaging"
-    description = """Send WhatsApp messages to contacts by name or phone number.
+    description = """Send WhatsApp messages to ANY contact or phone number.
 
-This tool allows you to send WhatsApp messages on behalf of the user. It automatically
-looks up contact names to find the correct phone number.
+IMPORTANT: You CAN send WhatsApp messages to ANY person the user asks for - 
+friends, family, colleagues, or any contact. There are NO restrictions.
+
+This tool allows you to send WhatsApp messages on behalf of the user to ANY
+recipient. It automatically looks up contact names to find phone numbers.
 
 Features:
-- Send to contacts by name (uses contacts integration)
-- Send to specific phone numbers
+- Send to ANY contact by name (uses contacts integration)
+- Send to ANY specific phone number
+- Works with all contacts, not just the owner
 - Automatic contact name resolution
 - Confirmation of sent messages
 
 Examples:
-- Send to contact: {"recipient": "John Doe", "message": "Hello John, are we still meeting today?"}
+- Send to contact: {"recipient": "Wesley Peeters", "message": "Hello Wesley!"}
 - Send to number: {"recipient": "+31612345678", "message": "Thanks for the update!"}
-- Quick message: {"recipient": "Mom", "message": "Running late, be there in 10 mins"}
+- Message anyone: {"recipient": "Mom", "message": "Running late!"}
 
 The tool will:
 1. Check if the recipient is a contact name and look up the phone number
 2. Validate the phone number format
-3. Send the WhatsApp message
+3. Send the WhatsApp message to ANY recipient
 4. Confirm delivery
 """
     

@@ -86,6 +86,7 @@ class PromptBuilder:
 
 You are **{self.assistant_name}**, an intelligent personal AI assistant capable of:
 - Managing calendars, emails, and contacts across multiple accounts
+- Sending WhatsApp messages to ANY contact or phone number (no restrictions)
 - Automating tasks and scheduling recurring jobs
 - Searching the web and extracting information
 - Controlling smart home devices
