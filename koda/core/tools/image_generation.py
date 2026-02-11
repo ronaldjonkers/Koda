@@ -348,24 +348,32 @@ Examples:
         # Generate based on provider
         logger.info(f"Generating image with {selected_provider.value}: {prompt[:50]}...")
         
-        if selected_provider == ImageProvider.POLLINATIONS:
-            result = await self._generate_pollinations(
-                prompt, width, height, seed, style, negative_prompt
-            )
-        elif selected_provider == ImageProvider.OPENROUTER:
-            result = await self._generate_openrouter(
-                prompt, model, width, height, seed
-            )
-        elif selected_provider == ImageProvider.GEMINI:
-            result = await self._generate_gemini(
-                prompt, model, width, height, aspect_ratio
-            )
-        elif selected_provider == ImageProvider.STABILITY:
-            result = await self._generate_stability(
-                prompt, model, width, height, seed, negative_prompt
-            )
-        else:
-            return f"❌ Provider '{selected_provider.value}' not implemented yet."
+        try:
+            if selected_provider == ImageProvider.POLLINATIONS:
+                result = await self._generate_pollinations(
+                    prompt, width, height, seed, style, negative_prompt
+                )
+            elif selected_provider == ImageProvider.OPENROUTER:
+                result = await self._generate_openrouter(
+                    prompt, model, width, height, seed
+                )
+            elif selected_provider == ImageProvider.GEMINI:
+                result = await self._generate_gemini(
+                    prompt, model, width, height, aspect_ratio
+                )
+            elif selected_provider == ImageProvider.STABILITY:
+                result = await self._generate_stability(
+                    prompt, model, width, height, seed, negative_prompt
+                )
+            else:
+                return f"❌ Provider '{selected_provider.value}' not implemented yet."
+        except APIKeyMissingError:
+            raise  # Re-raise to be handled by caller
+        except Exception as e:
+            import traceback
+            logger.error(f"Image generation failed for {selected_provider.value}: {e}")
+            logger.debug(f"Generation traceback: {traceback.format_exc()}")
+            return f"❌ Failed to generate image with {selected_provider.value}: {str(e)}"
         
         # Save and track
         if result.local_path:
@@ -448,10 +456,13 @@ Examples:
                 )
                 
             except httpx.HTTPStatusError as e:
-                logger.error(f"Pollinations API error: {e.response.status_code} - {e.response.text}")
+                error_text = e.response.text[:500] if e.response.text else "No response"
+                logger.error(f"Pollinations API error: {e.response.status_code} - {error_text}")
                 raise ValueError(f"Pollinations API error: {e.response.status_code}")
             except Exception as e:
+                import traceback
                 logger.error(f"Pollinations request failed: {e}")
+                logger.debug(f"Pollinations traceback: {traceback.format_exc()}")
                 raise
     
     async def _generate_openrouter(
@@ -521,19 +532,40 @@ Examples:
                 if not images:
                     raise ValueError("No image returned from OpenRouter")
                 
-                # Get first image (base64 data URL)
+                # Get first image (base64 data URL or dict)
                 image_data_url = images[0]
+                
+                # Handle different response formats
+                if isinstance(image_data_url, dict):
+                    # Some models return dict with 'url' or 'data' key
+                    logger.debug(f"Image data is dict, keys: {image_data_url.keys()}")
+                    if "url" in image_data_url:
+                        image_data_url = image_data_url["url"]
+                    elif "data" in image_data_url:
+                        image_data_url = image_data_url["data"]
+                    else:
+                        raise ValueError(f"Unexpected image format: {image_data_url}")
+                
+                if not isinstance(image_data_url, str):
+                    logger.error(f"Unexpected image_data_url type: {type(image_data_url)} - {image_data_url}")
+                    raise ValueError(f"Unexpected image format type: {type(image_data_url)}")
                 
                 # Parse base64 data
                 if image_data_url.startswith("data:image"):
                     base64_part = image_data_url.split(",")[1]
                     image_data = base64.b64decode(base64_part)
-                else:
+                elif image_data_url.startswith("http"):
                     # It's a URL, download it
                     img_response = await client.get(image_data_url)
                     img_response.raise_for_status()
                     image_data = img_response.content
                     base64_part = base64.b64encode(image_data).decode()
+                    image_data_url = f"data:image/png;base64,{base64_part}"
+                else:
+                    # Assume it's raw base64
+                    logger.debug(f"Assuming raw base64 data")
+                    image_data = base64.b64decode(image_data_url)
+                    base64_part = image_data_url
                     image_data_url = f"data:image/png;base64,{base64_part}"
                 
                 # Save to file
@@ -560,10 +592,13 @@ Examples:
                 )
                 
             except httpx.HTTPStatusError as e:
-                logger.error(f"OpenRouter API error: {e.response.status_code}")
+                error_body = e.response.text[:500] if e.response.text else "No response body"
+                logger.error(f"OpenRouter API error: {e.response.status_code} - {error_body}")
                 raise ValueError(f"OpenRouter API error: {e.response.status_code}")
             except Exception as e:
+                import traceback
                 logger.error(f"OpenRouter request failed: {e}")
+                logger.debug(f"OpenRouter traceback: {traceback.format_exc()}")
                 raise
     
     async def _generate_stability(
@@ -649,10 +684,13 @@ Examples:
                 )
                 
             except httpx.HTTPStatusError as e:
-                logger.error(f"Stability AI API error: {e.response.status_code}")
+                error_text = e.response.text[:500] if e.response.text else "No response"
+                logger.error(f"Stability AI API error: {e.response.status_code} - {error_text}")
                 raise ValueError(f"Stability AI API error: {e.response.status_code}")
             except Exception as e:
+                import traceback
                 logger.error(f"Stability AI request failed: {e}")
+                logger.debug(f"Stability traceback: {traceback.format_exc()}")
                 raise
     
     async def _generate_gemini(
@@ -765,7 +803,9 @@ Examples:
                     raise ValueError(f"Gemini Imagen API error: {e.response.status_code}")
                     
             except Exception as e:
+                import traceback
                 logger.error(f"Gemini Imagen request failed: {e}")
+                logger.debug(f"Gemini traceback: {traceback.format_exc()}")
                 raise
     
     async def _set_api_key(self, provider: str | None = None, api_key: str | None = None, **kwargs) -> str:

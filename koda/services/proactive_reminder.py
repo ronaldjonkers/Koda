@@ -322,6 +322,7 @@ class ProactiveReminderService:
             return
         
         try:
+            from datetime import timezone
             from koda.integrations.google_workspace import GoogleWorkspaceClient
             
             client = GoogleWorkspaceClient()
@@ -331,20 +332,32 @@ class ProactiveReminderService:
             # Get events in the next 24 hours
             events = client.get_upcoming_events(hours=24)
             
+            # Get current time in UTC for comparison
+            now = datetime.now(timezone.utc)
+            
             for event in events:
-                # Check if we already have a reminder for this event
-                existing = [r for r in self._reminders 
-                           if r.related_event_id == event.id and not r.sent]
-                if existing:
-                    continue
-                
-                # Schedule reminder
-                reminder_time = event.start - timedelta(
-                    minutes=self.config.calendar_default_minutes_before
-                )
-                
-                # Don't schedule if already passed
-                if reminder_time < datetime.now():
+                try:
+                    # Check if we already have a reminder for this event
+                    existing = [r for r in self._reminders 
+                               if r.related_event_id == event.id and not r.sent]
+                    if existing:
+                        continue
+                    
+                    # Get event start time and ensure it's timezone-aware
+                    event_start = event.start
+                    if event_start.tzinfo is None:
+                        event_start = event_start.replace(tzinfo=timezone.utc)
+                    
+                    # Schedule reminder
+                    reminder_time = event_start - timedelta(
+                        minutes=self.config.calendar_default_minutes_before
+                    )
+                    
+                    # Don't schedule if already passed
+                    if reminder_time < now:
+                        continue
+                except Exception as event_error:
+                    logger.warning(f"Error processing event {getattr(event, 'id', 'unknown')}: {event_error}")
                     continue
                 
                 message = self._format_calendar_reminder(event)
@@ -367,7 +380,9 @@ class ProactiveReminderService:
             self._save_reminders()
             
         except Exception as e:
+            import traceback
             logger.error(f"Error scanning calendar events: {e}")
+            logger.debug(f"Calendar scan traceback: {traceback.format_exc()}")
     
     def _is_important_event(self, event) -> bool:
         """Determine if an event is important based on various signals."""
