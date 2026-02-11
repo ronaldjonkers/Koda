@@ -373,6 +373,224 @@ def _test_config():
 
 
 # ============================================================================
+# Cron / Scheduled Tasks
+# ============================================================================
+
+@app.command()
+def cron(
+    action: str = typer.Argument(..., help="Action: list, add, remove, enable, disable, run, status"),
+    name: str = typer.Option(None, "--name", "-n", help="Task name (for add)"),
+    schedule: str = typer.Option(None, "--schedule", "-s", help="Schedule: cron expression, 'daily', 'hourly', or ISO datetime"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="What the agent should do"),
+    task_id: str = typer.Option(None, "--id", help="Task ID (for remove, enable, disable, run)"),
+    deliver: str = typer.Option(None, "--deliver", "-d", help="Deliver to: whatsapp:+316... or telegram:..."),
+):
+    """Manage scheduled tasks (cron jobs).
+    
+    Schedule recurring or one-time tasks for the agent to execute.
+    
+    Examples:
+        koda cron list                    # Show all tasks
+        koda cron status                  # Show scheduler status
+        koda cron add -n "Morning Briefing" -s "0 8 * * *" -p "Send morning briefing to WhatsApp" -d "whatsapp:+31612345678"
+        koda cron add -n "Hourly Check" -s "hourly" -p "Check for important emails"
+        koda cron remove --id abc123      # Remove a task
+        koda cron disable --id abc123     # Pause a task
+        koda cron run --id abc123         # Run a task manually
+    """
+    from koda.scheduler.service import CronService
+    from koda.scheduler.types import CronSchedule
+    from koda.config.loader import get_data_dir
+    
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    service = CronService(store_path)
+    
+    if action == "list":
+        jobs = service.list_jobs(include_disabled=True)
+        if not jobs:
+            console.print("[yellow]No scheduled tasks found.[/yellow]")
+            console.print("\nUse [cyan]koda cron add[/cyan] to create a task.")
+            return
+        
+        console.print(f"[bold]Scheduled Tasks[/bold] ({len(jobs)} total)\n")
+        
+        from datetime import datetime
+        table = Table(show_header=True)
+        table.add_column("ID", style="dim")
+        table.add_column("Name")
+        table.add_column("Schedule")
+        table.add_column("Status")
+        table.add_column("Next Run")
+        
+        for job in jobs:
+            status = "✅ Enabled" if job.enabled else "❌ Disabled"
+            
+            # Format schedule
+            if job.schedule.kind == "cron":
+                sched = f"cron: {job.schedule.expr}"
+            elif job.schedule.kind == "every":
+                mins = job.schedule.every_ms // 60000 if job.schedule.every_ms else 0
+                sched = f"every {mins}m"
+            elif job.schedule.kind == "at":
+                dt = datetime.fromtimestamp(job.schedule.at_ms / 1000)
+                sched = f"at {dt.strftime('%Y-%m-%d %H:%M')}"
+            else:
+                sched = job.schedule.kind
+            
+            # Format next run
+            if job.enabled and job.state.next_run_at_ms:
+                next_dt = datetime.fromtimestamp(job.state.next_run_at_ms / 1000)
+                next_str = next_dt.strftime('%Y-%m-%d %H:%M')
+            else:
+                next_str = "-"
+            
+            table.add_row(job.id, job.name, sched, status, next_str)
+        
+        console.print(table)
+        
+    elif action == "status":
+        status = service.status()
+        console.print("[bold]Scheduler Status[/bold]\n")
+        console.print(f"Running: {'✅ Yes' if status['enabled'] else '❌ No'}")
+        console.print(f"Total jobs: {status['jobs_total']}")
+        console.print(f"Enabled jobs: {status['jobs_enabled']}")
+        if status['next_wake_at']:
+            console.print(f"Next wake: {status['next_wake_at']}")
+    
+    elif action == "add":
+        if not name:
+            console.print("[red]Error: --name is required[/red]")
+            console.print("Example: koda cron add -n 'My Task' -s '0 9 * * *' -p 'Do something'")
+            raise typer.Exit(1)
+        
+        if not schedule:
+            console.print("[red]Error: --schedule is required[/red]")
+            console.print("Examples:\n  -s '0 8 * * *'  (daily at 8am)\n  -s 'hourly'\n  -s '2024-12-25T09:00:00'")
+            raise typer.Exit(1)
+        
+        if not prompt:
+            console.print("[red]Error: --prompt is required[/red]")
+            console.print("This is what the agent will do when the task runs.")
+            raise typer.Exit(1)
+        
+        # Parse schedule
+        schedule_obj = CronSchedule(kind="cron")
+        
+        if schedule == "daily":
+            schedule_obj = CronSchedule(kind="cron", expr="0 8 * * *", tz="Europe/Amsterdam")
+        elif schedule == "hourly":
+            schedule_obj = CronSchedule(kind="every", every_ms=3600000)
+        elif schedule.startswith("every "):
+            # Parse "every 30m" or "every 2h"
+            parts = schedule.split()
+            if len(parts) == 2:
+                interval = parts[1]
+                if interval.endswith("m"):
+                    ms = int(interval[:-1]) * 60000
+                    schedule_obj = CronSchedule(kind="every", every_ms=ms)
+                elif interval.endswith("h"):
+                    ms = int(interval[:-1]) * 3600000
+                    schedule_obj = CronSchedule(kind="every", every_ms=ms)
+                else:
+                    schedule_obj = CronSchedule(kind="cron", expr="0 8 * * *")
+            else:
+                schedule_obj = CronSchedule(kind="cron", expr="0 8 * * *")
+        elif "T" in schedule or "-" in schedule[:10]:
+            # ISO datetime - one-time task
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(schedule)
+                at_ms = int(dt.timestamp() * 1000)
+                schedule_obj = CronSchedule(kind="at", at_ms=at_ms)
+            except ValueError:
+                console.print(f"[red]Invalid datetime format: {schedule}[/red]")
+                console.print("Use ISO format: 2024-12-25T09:00:00")
+                raise typer.Exit(1)
+        else:
+            # Assume cron expression
+            schedule_obj = CronSchedule(kind="cron", expr=schedule, tz="Europe/Amsterdam")
+        
+        # Parse delivery
+        channel = None
+        to = None
+        deliver = bool(deliver)
+        if deliver:
+            if ":" in deliver:
+                channel, to = deliver.split(":", 1)
+            else:
+                console.print("[red]Invalid --deliver format. Use: whatsapp:+31612345678[/red]")
+                raise typer.Exit(1)
+        
+        job = service.add_job(
+            name=name,
+            schedule=schedule_obj,
+            message=prompt,
+            deliver=deliver,
+            channel=channel,
+            to=to
+        )
+        
+        console.print(f"[green]✅ Created scheduled task:[/green] {name}")
+        console.print(f"   ID: {job.id}")
+        if job.state.next_run_at_ms:
+            from datetime import datetime
+            next_run = datetime.fromtimestamp(job.state.next_run_at_ms / 1000)
+            console.print(f"   Next run: {next_run.strftime('%Y-%m-%d %H:%M')}")
+    
+    elif action == "remove":
+        if not task_id:
+            console.print("[red]Error: --id is required[/red]")
+            console.print("Use 'koda cron list' to see task IDs")
+            raise typer.Exit(1)
+        
+        if service.remove_job(task_id):
+            console.print(f"[green]✅ Removed task {task_id}[/green]")
+        else:
+            console.print(f"[red]❌ Task {task_id} not found[/red]")
+    
+    elif action == "enable":
+        if not task_id:
+            console.print("[red]Error: --id is required[/red]")
+            raise typer.Exit(1)
+        
+        if service.set_job_enabled(task_id, True):
+            console.print(f"[green]✅ Enabled task {task_id}[/green]")
+        else:
+            console.print(f"[red]❌ Task {task_id} not found[/red]")
+    
+    elif action == "disable":
+        if not task_id:
+            console.print("[red]Error: --id is required[/red]")
+            raise typer.Exit(1)
+        
+        if service.set_job_enabled(task_id, False):
+            console.print(f"[yellow]⏸️ Disabled task {task_id}[/yellow]")
+        else:
+            console.print(f"[red]❌ Task {task_id} not found[/red]")
+    
+    elif action == "run":
+        if not task_id:
+            console.print("[red]Error: --id is required[/red]")
+            raise typer.Exit(1)
+        
+        import asyncio
+        
+        async def do_run():
+            success = await service.run_job(task_id, force=True)
+            return success
+        
+        success = asyncio.run(do_run())
+        if success:
+            console.print(f"[green]✅ Executed task {task_id}[/green]")
+        else:
+            console.print(f"[red]❌ Task {task_id} not found or disabled[/red]")
+    
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        console.print("Valid actions: list, status, add, remove, enable, disable, run")
+
+
+# ============================================================================
 # Setup Proxy (for external access)
 # ============================================================================
 
