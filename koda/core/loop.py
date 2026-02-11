@@ -285,7 +285,7 @@ class AgentLoop:
         
         # WhatsApp Messaging (for sending messages to contacts)
         self.whatsapp_msg_tool = WhatsAppMessagingTool(
-            bus=bus,
+            bus=self.bus,
             owner_phone=getattr(full_config.channels.whatsapp, 'owner_phone', None) if full_config else None
         )
         self.tools.register(self.whatsapp_msg_tool)

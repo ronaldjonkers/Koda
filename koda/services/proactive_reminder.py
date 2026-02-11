@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -187,7 +187,7 @@ class ProactiveReminderService:
         if not self.config.respect_quiet_hours:
             return False
         
-        now = check_time or datetime.now()
+        now = check_time or datetime.now(timezone.utc)
         current_time = now.strftime("%H:%M")
         
         quiet_start = self.config.quiet_hours_start
@@ -202,7 +202,7 @@ class ProactiveReminderService:
     
     def _get_next_non_quiet_time(self) -> datetime:
         """Get the next time outside quiet hours."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         quiet_end = datetime.strptime(self.config.quiet_hours_end, "%H:%M").time()
         
         next_time = now.replace(hour=quiet_end.hour, minute=quiet_end.minute, second=0)
@@ -246,7 +246,7 @@ class ProactiveReminderService:
     
     async def _check_and_send_reminders(self) -> None:
         """Check for due reminders and send them."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         for reminder in self._reminders:
             if reminder.sent:
@@ -276,7 +276,7 @@ class ProactiveReminderService:
                 )
                 
                 reminder.sent = True
-                reminder.sent_at = datetime.now()
+                reminder.sent_at = datetime.now(timezone.utc)
                 self._save_reminders()
                 
                 logger.info(f"Sent {reminder.type.value} reminder: {reminder.title}")
@@ -285,7 +285,7 @@ class ProactiveReminderService:
     
     async def _scan_for_new_reminders(self) -> None:
         """Scan for new events that need reminders."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         # Check calendar events (every 5 minutes)
         if self._should_check("calendar", minutes=5):
@@ -307,11 +307,11 @@ class ProactiveReminderService:
         """Check if enough time has passed since last check."""
         last = self._last_check.get(check_type)
         if not last:
-            self._last_check[check_type] = datetime.now()
+            self._last_check[check_type] = datetime.now(timezone.utc)
             return True
         
-        if datetime.now() - last >= timedelta(minutes=minutes):
-            self._last_check[check_type] = datetime.now()
+        if datetime.now(timezone.utc) - last >= timedelta(minutes=minutes):
+            self._last_check[check_type] = datetime.now(timezone.utc)
             return True
         
         return False
@@ -455,7 +455,7 @@ class ProactiveReminderService:
                 # Schedule for configured days before
                 if days_until == self.config.birthday_days_before:
                     send_time = datetime.strptime(self.config.birthday_send_time, "%H:%M").time()
-                    scheduled = datetime.combine(date.today(), send_time)
+                    scheduled = datetime.combine(date.today(), send_time).replace(tzinfo=timezone.utc)
                     
                     age = contact.get("age")
                     age_text = f" ({age} jaar)" if age else ""
@@ -490,10 +490,10 @@ class ProactiveReminderService:
         """Schedule the daily morning briefing."""
         try:
             send_time = datetime.strptime(self.config.calendar_morning_check_time, "%H:%M").time()
-            scheduled = datetime.combine(date.today(), send_time)
+            scheduled = datetime.combine(date.today(), send_time).replace(tzinfo=timezone.utc)
             
             # If already passed today, schedule for tomorrow
-            if scheduled < datetime.now():
+            if scheduled < datetime.now(timezone.utc):
                 scheduled += timedelta(days=1)
             
             # Check if already scheduled
@@ -582,7 +582,7 @@ class ProactiveReminderService:
     ) -> str:
         """Add a custom reminder."""
         reminder = ProactiveReminder(
-            id=f"custom_{int(datetime.now().timestamp())}_{hash(title) % 10000}",
+            id=f"custom_{int(datetime.now(timezone.utc).timestamp())}_{hash(title) % 10000}",
             type=ReminderType.CUSTOM,
             title=title,
             message=message,
@@ -602,7 +602,7 @@ class ProactiveReminderService:
         """Snooze a reminder for N minutes."""
         for reminder in self._reminders:
             if reminder.id == reminder_id:
-                reminder.snooze_until = datetime.now() + timedelta(minutes=minutes)
+                reminder.snooze_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
                 reminder.sent = False
                 self._save_reminders()
                 logger.info(f"Snoozed reminder '{reminder.title}' for {minutes} minutes")
@@ -624,7 +624,7 @@ class ProactiveReminderService:
     
     def clear_old_reminders(self, days: int = 7) -> int:
         """Clear reminders older than N days."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         old_count = len(self._reminders)
         self._reminders = [
             r for r in self._reminders 
