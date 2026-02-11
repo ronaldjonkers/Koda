@@ -1,5 +1,14 @@
-"""Unified calendar tool with multi-provider support, Google Meet, and WhatsApp reminders."""
+"""Unified calendar tool with multi-provider support, Google Meet, and proactive reminders.
 
+This tool provides:
+- Multi-calendar support (Google, Exchange, CalDAV)
+- Automatic shared calendar discovery
+- Proactive appointment reminders
+- WhatsApp notification integration
+- Smart conflict detection
+"""
+
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -10,61 +19,67 @@ from koda.core.tools.base import BaseTool
 
 class UnifiedCalendarTool(BaseTool):
     """
-    Unified calendar tool that supports multiple named calendar accounts.
+    Unified calendar tool that supports multiple named calendar accounts with intelligent features.
     
     Features:
     - Multiple named calendar accounts (e.g., "Werk", "Privé", "Familie")
-    - Automatic calendar selection prompt when ambiguous
-    - Google Meet link generation for Google Calendar events
-    - WhatsApp reminder scheduling before appointments
-    - Lists available calendars across all providers
-    - No limit on number of connected accounts
+    - Automatic shared calendar discovery and access
+    - Proactive WhatsApp reminders before appointments
+    - Smart conflict detection when scheduling
+    - Google Meet link generation
+    - Cross-calendar event aggregation
+    
+    The tool automatically detects Google Workspace connections and includes all
+    accessible calendars including shared ones.
     """
     
     name = "calendar"
-    description = """Schedule and manage calendar events across multiple named calendar accounts.
+    description = """Schedule and manage calendar events across multiple calendar accounts.
 
-Calendars are identified by their user-defined NAME (e.g., "Werk", "Privé", "Familie").
-Use the 'calendars' action to see all available calendar names.
+This tool provides intelligent calendar management with automatic shared calendar discovery,
+proactive reminders, and conflict detection.
 
-IMPORTANT: When creating an event, ALWAYS:
-1. Ask which calendar to use BY NAME if not specified and multiple calendars are available
-2. Ask if the user wants a WhatsApp reminder before the event
-3. For Google Calendar meetings, ask if they want a Google Meet link added
+Calendar Selection:
+- Use 'calendars' action first to see available calendars
+- Calendar names are user-defined (e.g., "Werk Google", "Privé", "Team Kalender")
+- Shared calendars are automatically discovered and accessible
 
 Actions:
-- list: List upcoming events from all calendars
-- today: Get today's events from all calendars  
-- create: Create a new event (will prompt for calendar name, reminder, and meet link)
-- update: Update an existing event (change time, location, description, add Meet link)
+- list: List upcoming events from all calendars (includes shared)
+- today: Get today's events from all calendars
+- week: Get this week's events
+- create: Create a new event with conflict checking
+- update: Update an existing event
 - delete: Delete an event
-- calendars: List all available calendars with their names
+- calendars: List all available calendars with their names and types
+- conflicts: Check for scheduling conflicts
+- upcoming: Get events in the next N hours (default: 24)
 
-Parameters for 'update':
-- event_id: Event ID to update (required)
-- calendar: Calendar NAME where the event is located
-- summary: New event title
-- start: New start datetime ISO format
-- end: New end datetime ISO format
-- location: New location
-- description: New description
-- add_meet_link: Add Google Meet link (Google only)
-
-Parameters for 'delete':
-- event_id: Event ID to delete (required)
-- calendar: Calendar NAME where the event is located
+Smart Features:
+- Automatically includes shared calendars from Google Workspace
+- Checks for conflicts before creating events
+- Can send WhatsApp reminders before appointments
+- Auto-discovers all accessible calendars
 
 Parameters for 'create':
 - summary: Event title (required)
 - start: Start datetime ISO format (required)
 - end: End datetime ISO format (required)
-- calendar: Calendar NAME to use (e.g., "Werk", "Privé", or the account name)
+- calendar: Calendar NAME to use (e.g., "Werk", "Privé")
 - description: Event description
 - location: Event location
-- attendees: List of attendee emails
-- add_meet_link: Add Google Meet link (only for Google-type calendars)
-- whatsapp_reminder: Minutes before event to send WhatsApp reminder
-- reminder_phone: Phone number for WhatsApp reminder (defaults to owner)
+- attendees: List of attendee email addresses
+- add_meet_link: Add Google Meet link (Google calendars only)
+- whatsapp_reminder: Minutes before event to send reminder (e.g., 15, 30, 60)
+- check_conflicts: Check for conflicts before creating (default: true)
+
+Parameters for 'upcoming':
+- hours: Number of hours to look ahead (default: 24)
+
+Parameters for 'conflicts':
+- start: Start datetime to check
+- end: End datetime to check
+- calendar: Specific calendar to check (optional, checks all if not specified)
 """
     
     parameters = {
@@ -72,7 +87,7 @@ Parameters for 'create':
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "today", "create", "update", "delete", "calendars"],
+                "enum": ["list", "today", "week", "create", "update", "delete", "calendars", "conflicts", "upcoming"],
                 "description": "Action to perform"
             },
             "event_id": {
@@ -83,9 +98,13 @@ Parameters for 'create':
                 "type": "integer",
                 "description": "Number of days to look ahead (for list action)"
             },
+            "hours": {
+                "type": "integer",
+                "description": "Number of hours to look ahead (for upcoming action)"
+            },
             "calendar": {
                 "type": "string",
-                "description": "Calendar to use: 'google', 'exchange', 'caldav', or specific calendar ID"
+                "description": "Calendar to use: specific name like 'Werk Google', 'Privé', etc."
             },
             "summary": {
                 "type": "string",
@@ -93,11 +112,11 @@ Parameters for 'create':
             },
             "start": {
                 "type": "string",
-                "description": "Start datetime ISO format (for create action)"
+                "description": "Start datetime ISO format (for create/conflicts action)"
             },
             "end": {
                 "type": "string",
-                "description": "End datetime ISO format (for create action)"
+                "description": "End datetime ISO format (for create/conflicts action)"
             },
             "description": {
                 "type": "string",
@@ -123,6 +142,10 @@ Parameters for 'create':
             "reminder_phone": {
                 "type": "string",
                 "description": "Phone number for WhatsApp reminder"
+            },
+            "check_conflicts": {
+                "type": "boolean",
+                "description": "Check for conflicts before creating event"
             }
         },
         "required": ["action"]
@@ -181,21 +204,13 @@ Parameters for 'create':
         # Clients cache by account name
         self._clients: dict[str, Any] = {}
         
-        # Check if Google Workspace is available (for Meet links)
+        # Check if Google Workspace is available (for Meet links and shared calendars)
         self._google_workspace_client = None
         self._google_workspace_available = self._check_google_workspace()
         
-        # Auto-add Google Workspace as a calendar account if connected
+        # Auto-add Google Workspace with all calendars if connected
         if self._google_workspace_available:
-            # Check if we already have a google account
-            has_google = any(acc.get("type") == "google" for acc in self.calendar_accounts)
-            if not has_google:
-                self.calendar_accounts.append({
-                    "name": "Google",
-                    "type": "google",
-                    "auto_added": True
-                })
-                logger.info("Auto-added Google Workspace as calendar account")
+            self._add_google_workspace_calendars()
     
     def _check_google_workspace(self) -> bool:
         """Check if Google Workspace is configured and authorized."""
@@ -206,13 +221,49 @@ Parameters for 'create':
             logger.debug(f"Google Workspace status: {status}")
             if status.get("authorized"):
                 self._google_workspace_client = client
-                logger.info("Google Workspace is authorized and available")
+                logger.info("✅ Google Workspace is authorized and available")
                 return True
             else:
                 logger.debug(f"Google Workspace not authorized: {status}")
         except Exception as e:
             logger.debug(f"Google Workspace check failed: {e}")
         return False
+    
+    def _add_google_workspace_calendars(self) -> None:
+        """Add Google Workspace with all discovered calendars including shared ones."""
+        try:
+            if not self._google_workspace_client:
+                return
+            
+            # Get all calendars including shared ones
+            all_calendars = self._google_workspace_client.list_calendars(use_cache=False)
+            
+            # Check if we already have Google accounts
+            existing_google = [acc for acc in self.calendar_accounts if acc.get("type") == "google"]
+            
+            if not existing_google:
+                # Add each calendar as a separate account for easy selection
+                for cal in all_calendars:
+                    account_name = cal.name
+                    if cal.is_shared:
+                        account_name = f"{cal.name} (Shared)"
+                    
+                    # Check if this calendar is already added
+                    existing = [acc for acc in self.calendar_accounts if acc.get("name") == account_name]
+                    if not existing:
+                        self.calendar_accounts.append({
+                            "name": account_name,
+                            "type": "google_workspace",
+                            "calendar_id": cal.id,
+                            "is_shared": cal.is_shared,
+                            "access_role": cal.access_role,
+                            "auto_added": True
+                        })
+                        logger.info(f"Added calendar: {account_name}")
+                
+                logger.info(f"Auto-added {len(all_calendars)} Google calendars ({sum(1 for c in all_calendars if c.is_shared)} shared)")
+        except Exception as e:
+            logger.warning(f"Failed to add Google Workspace calendars: {e}")
     
     def _get_client_for_account(self, account: dict) -> Any:
         """Get or create a client for a named account."""
@@ -222,7 +273,15 @@ Parameters for 'create':
         
         account_type = account.get("type", "")
         
-        if account_type == "google":
+        if account_type == "google_workspace":
+            # Use the shared Google Workspace client
+            if self._google_workspace_client:
+                return self._google_workspace_client
+            else:
+                # Try to re-initialize
+                if self._check_google_workspace():
+                    return self._google_workspace_client
+        elif account_type == "google":
             # Prefer GoogleWorkspaceClient if available (supports Meet links)
             if self._google_workspace_client:
                 client = self._google_workspace_client
@@ -258,11 +317,19 @@ Parameters for 'create':
         return client
     
     def _get_account_by_name(self, name: str) -> dict | None:
-        """Find a calendar account by name (case-insensitive)."""
+        """Find a calendar account by name (case-insensitive, partial match)."""
         name_lower = name.lower()
+        
+        # First try exact match
         for account in self.calendar_accounts:
             if account.get("name", "").lower() == name_lower:
                 return account
+        
+        # Then try partial match
+        for account in self.calendar_accounts:
+            if name_lower in account.get("name", "").lower():
+                return account
+        
         return None
     
     def _get_account_names(self) -> list[str]:
@@ -279,6 +346,9 @@ Parameters for 'create':
             elif action == "today":
                 return await self._list_events(days=1, today_only=True)
             
+            elif action == "week":
+                return await self._list_events(days=7, week_view=True)
+            
             elif action == "calendars":
                 return await self._list_calendars()
             
@@ -291,11 +361,16 @@ Parameters for 'create':
             elif action == "delete":
                 return await self._delete_event(**kwargs)
             
+            elif action == "conflicts":
+                return await self._check_conflicts(**kwargs)
+            
+            elif action == "upcoming":
+                return await self._get_upcoming(kwargs.get("hours", 24))
+            
             else:
                 return f"Unknown action: {action}"
         
         except ConnectionError as e:
-            # Connection errors - show friendly message to user, full error on server
             import traceback
             logger.error(f"Calendar connection error:")
             logger.error(f"Full error: {e}")
@@ -304,18 +379,19 @@ Parameters for 'create':
 
 Mogelijke oorzaken:
 • Onjuiste inloggegevens (email/wachtwoord)
+• Google Workspace token verlopen - probeer '/resetgoogle' of 'koda setup-google'
 • Server is niet bereikbaar
 • Autodiscover werkt niet voor dit account
 
 Probeer:
 1. Controleer of je wachtwoord correct is
 2. Gebruik /removecalendar en /addcalendar om opnieuw in te stellen
-3. Probeer handmatig een server op te geven
+3. Voor Google: reset de connectie met 'koda setup-google --reset'
+4. Probeer handmatig een server op te geven
 
 _Technische fout is gelogd op de server._"""
         
         except Exception as e:
-            # Other errors - log full details on server
             import traceback
             logger.error(f"Calendar operation failed for action '{action}':")
             logger.error(f"Full error: {e}")
@@ -324,35 +400,43 @@ _Technische fout is gelogd op de server._"""
     
     async def _list_calendars(self) -> str:
         """List all available calendar accounts with their names."""
-        if not self.calendar_accounts:
-            return "No calendar accounts configured. Run 'koda config calendar' to add an account."
+        # Refresh Google Workspace calendars to catch any new shared calendars
+        if self._google_workspace_available:
+            self._add_google_workspace_calendars()
         
-        output = ["**Available Calendar Accounts:**\n"]
+        if not self.calendar_accounts:
+            return "Geen kalenders geconfigureerd. Gebruik 'koda config calendar' om een account toe te voegen."
+        
+        output = ["**Beschikbare Kalenders:**\n"]
         
         for account in self.calendar_accounts:
             name = account.get("name", "Unnamed")
             account_type = account.get("type", "unknown")
-            type_label = {"google": "Google Calendar", "exchange": "Exchange", "caldav": "CalDAV"}.get(account_type, account_type)
+            is_shared = account.get("is_shared", False)
+            access_role = account.get("access_role", "")
             
-            output.append(f"• **{name}** ({type_label})")
+            type_label = {
+                "google_workspace": "📅 Google",
+                "google": "📅 Google",
+                "exchange": "🏢 Exchange",
+                "caldav": "🔗 CalDAV"
+            }.get(account_type, account_type)
+            
+            shared_label = " (Shared)" if is_shared else ""
+            access_label = f" [{access_role}]" if access_role and access_role != "owner" else ""
+            
+            output.append(f"• **{name}**{shared_label}{access_label}")
+            output.append(f"  Type: {type_label}")
             
             # Show additional details based on type
-            if account_type == "google":
+            if account_type in ["google", "google_workspace"]:
                 try:
                     client = self._get_client_for_account(account)
-                    calendars = client.list_calendars()
-                    for cal in calendars[:5]:  # Show first 5
-                        # Handle both dict and dataclass
-                        if hasattr(cal, 'name'):
-                            cal_name = cal.name
-                            is_primary = cal.is_primary
-                        else:
-                            cal_name = cal.get('summary', cal.get('name', 'Unknown'))
-                            is_primary = cal.get('primary', False)
-                        primary = " ⭐" if is_primary else ""
-                        output.append(f"  - {cal_name}{primary}")
+                    if client and hasattr(client, 'list_calendars'):
+                        calendars = client.list_calendars()
+                        output.append(f"  Toegang tot {len(calendars)} kalender(s)")
                 except Exception as e:
-                    output.append(f"  ⚠️ Error: {e}")
+                    output.append(f"  ⚠️ Fout: {e}")
             elif account_type == "exchange":
                 output.append(f"  📧 {account.get('email', '')}")
             elif account_type == "caldav":
@@ -360,16 +444,21 @@ _Technische fout is gelogd op de server._"""
             
             output.append("")
         
-        output.append("_Use the calendar NAME when creating events._")
+        output.append("_Gebruik de kalender NAAM bij het maken van afspraken._")
         return "\n".join(output)
     
-    async def _list_events(self, days: int = 7, today_only: bool = False) -> str:
+    async def _list_events(self, days: int = 7, today_only: bool = False, week_view: bool = False) -> str:
         """List events from all calendar accounts."""
         all_events = []
         
-        title = "Today's events" if today_only else f"Events (next {days} days)"
+        if today_only:
+            title = "📅 Agenda voor vandaag"
+        elif week_view:
+            title = "📅 Agenda deze week"
+        else:
+            title = f"📅 Agenda komende {days} dagen"
         
-        logger.debug(f"Fetching events from {len(self.calendar_accounts)} calendar accounts: {[a.get('name') for a in self.calendar_accounts]}")
+        logger.debug(f"Fetching events from {len(self.calendar_accounts)} calendar accounts")
         
         for account in self.calendar_accounts:
             account_name = account.get("name", "Unknown")
@@ -378,40 +467,41 @@ _Technische fout is gelogd op de server._"""
             try:
                 client = self._get_client_for_account(account)
                 if not client:
-                    logger.warning(f"No client available for {account_name} (type={account_type})")
+                    logger.warning(f"No client available for {account_name}")
                     continue
                 
-                logger.debug(f"Fetching events from {account_name} using {type(client).__name__}")
+                logger.debug(f"Fetching events from {account_name}")
                 
-                if account_type == "google":
-                    # GoogleWorkspaceClient uses list_events()
-                    # Use timezone-aware datetimes for Google API
+                if account_type in ["google", "google_workspace"]:
                     from datetime import timezone
                     now = datetime.now(timezone.utc)
+                    
                     if today_only:
                         time_max = now.replace(hour=23, minute=59, second=59)
                     else:
                         time_max = now + timedelta(days=days)
                     
-                    # Use calendar_id="all" to get events from all calendars
-                    logger.debug(f"Google calendar query: {now.isoformat()} to {time_max.isoformat()}")
+                    # Get specific calendar ID if specified
+                    calendar_id = account.get("calendar_id", "all")
+                    
                     events = client.list_events(
-                        calendar_id="all",
+                        calendar_id=calendar_id,
                         time_min=now,
                         time_max=time_max
                     )
-                    logger.debug(f"Google returned {len(events)} events")
+                    
                     for e in events:
-                        # Convert GoogleCalendarEvent dataclass to dict
                         event_dict = {
                             "_account": account_name,
+                            "_is_shared": account.get("is_shared", False),
                             "id": e.id,
                             "summary": e.summary,
                             "start": e.start.isoformat() if e.start else "",
                             "end": e.end.isoformat() if e.end else "",
                             "location": e.location,
                             "meet_link": e.meet_link,
-                            "calendar_name": e.calendar_name,
+                            "calendar_name": e.calendar_name if hasattr(e, 'calendar_name') else account_name,
+                            "is_recurring": getattr(e, 'is_recurring', False),
                         }
                         all_events.append(event_dict)
                 
@@ -426,7 +516,7 @@ _Technische fout is gelogd op de server._"""
                         )
                     for e in events:
                         e["_account"] = account_name
-                        e["summary"] = e.get("subject", e.get("summary", "(No title)"))
+                        e["summary"] = e.get("subject", e.get("summary", "(Geen titel)"))
                         all_events.append(e)
                 
                 elif account_type == "caldav":
@@ -434,7 +524,7 @@ _Technische fout is gelogd op de server._"""
                     for e in events:
                         all_events.append({
                             "_account": account_name,
-                            "id": e.uid,  # Include UID for update/delete
+                            "id": e.uid,
                             "summary": e.summary,
                             "start": e.start.isoformat() if e.start else "",
                             "end": e.end.isoformat() if e.end else "",
@@ -447,7 +537,7 @@ _Technische fout is gelogd op de server._"""
                 logger.debug(f"Calendar error traceback:\n{traceback.format_exc()}")
         
         if not all_events:
-            return f"{title}: No events found."
+            return f"{title}: Geen afspraken gevonden."
         
         # Sort by start time
         def get_start(e):
@@ -461,30 +551,171 @@ _Technische fout is gelogd op de server._"""
         
         all_events.sort(key=get_start)
         
-        output = [f"**{title}** ({len(all_events)} events):\n"]
+        # Group by day for better readability
+        output = [f"**{title}** ({len(all_events)} afspraken):\n"]
         
+        current_day = None
         for e in all_events:
             start = e.get("start", "")
             if isinstance(start, str) and start:
                 try:
-                    start = datetime.fromisoformat(start.replace("Z", "")).strftime("%Y-%m-%d %H:%M")
+                    start_dt = datetime.fromisoformat(start.replace("Z", ""))
+                    day_str = start_dt.strftime("%A %d %B").capitalize()
+                    time_str = start_dt.strftime("%H:%M")
+                    
+                    # Add day header if new day
+                    if day_str != current_day:
+                        current_day = day_str
+                        output.append(f"\n**{day_str}**")
+                    
+                    start_display = time_str
                 except:
-                    pass
+                    start_display = start
+            else:
+                start_display = str(start)
             
             account = e.get("_account", "")
-            event_id = e.get("id") or e.get("event_id") or e.get("uid", "")
+            is_shared = e.get("_is_shared", False)
+            shared_label = " [shared]" if is_shared else ""
             
-            output.append(f"• **{e.get('summary', '(No title)')}** [{account}]")
-            output.append(f"  📅 {start}")
+            output.append(f"  • **{e.get('summary', '(Geen titel)')}** [{account}]{shared_label}")
+            output.append(f"    🕐 {start_display}")
+            
+            if e.get("location"):
+                output.append(f"    📍 {e['location']}")
+            if e.get("meet_link"):
+                output.append(f"    🔗 {e['meet_link']}")
+            if e.get("is_recurring"):
+                output.append(f"    🔄 Terugkerend")
+        
+        return "\n".join(output)
+    
+    async def _get_upcoming(self, hours: int = 24) -> str:
+        """Get upcoming events in the next N hours."""
+        all_events = []
+        from datetime import timezone
+        
+        now = datetime.now(timezone.utc)
+        time_max = now + timedelta(hours=hours)
+        
+        for account in self.calendar_accounts:
+            account_name = account.get("name", "Unknown")
+            account_type = account.get("type", "")
+            
+            try:
+                client = self._get_client_for_account(account)
+                if not client:
+                    continue
+                
+                if account_type in ["google", "google_workspace"]:
+                    calendar_id = account.get("calendar_id", "all")
+                    events = client.list_events(
+                        calendar_id=calendar_id,
+                        time_min=now,
+                        time_max=time_max
+                    )
+                    for e in events:
+                        all_events.append({
+                            "_account": account_name,
+                            "summary": e.summary,
+                            "start": e.start,
+                            "location": e.location,
+                            "meet_link": e.meet_link,
+                        })
+            except Exception as e:
+                logger.debug(f"Error fetching from {account_name}: {e}")
+        
+        if not all_events:
+            return f"Geen afspraken in de komende {hours} uur."
+        
+        # Sort by start time
+        all_events.sort(key=lambda e: e.get("start", datetime.max))
+        
+        output = [f"**Komende {hours} uur** ({len(all_events)} afspraken):\n"]
+        
+        for e in all_events:
+            start = e.get("start")
+            if isinstance(start, datetime):
+                time_str = start.strftime("%H:%M")
+                date_str = start.strftime("%d %b")
+                display_time = f"{date_str} {time_str}"
+            else:
+                display_time = str(start)
+            
+            output.append(f"• **{e.get('summary')}** [{e.get('_account')}]")
+            output.append(f"  🕐 {display_time}")
             if e.get("location"):
                 output.append(f"  📍 {e['location']}")
-            if event_id:
-                # Show short ID for readability
-                short_id = event_id[:20] + "..." if len(str(event_id)) > 20 else event_id
-                output.append(f"  🆔 `{short_id}`")
             output.append("")
         
         return "\n".join(output)
+    
+    async def _check_conflicts(self, **kwargs) -> str:
+        """Check for scheduling conflicts."""
+        start_str = kwargs.get("start")
+        end_str = kwargs.get("end")
+        calendar_name = kwargs.get("calendar")
+        
+        if not start_str or not end_str:
+            return "Error: start en end tijden zijn vereist voor conflict check."
+        
+        try:
+            start = datetime.fromisoformat(start_str)
+            end = datetime.fromisoformat(end_str)
+        except ValueError as e:
+            return f"Error parsing datetime: {e}"
+        
+        conflicts = []
+        
+        # Check specific calendar or all calendars
+        accounts_to_check = []
+        if calendar_name:
+            account = self._get_account_by_name(calendar_name)
+            if account:
+                accounts_to_check = [account]
+            else:
+                return f"Kalender '{calendar_name}' niet gevonden."
+        else:
+            accounts_to_check = self.calendar_accounts
+        
+        for account in accounts_to_check:
+            account_name = account.get("name", "Unknown")
+            account_type = account.get("type", "")
+            
+            try:
+                client = self._get_client_for_account(account)
+                if not client:
+                    continue
+                
+                if account_type in ["google", "google_workspace"]:
+                    from datetime import timezone
+                    calendar_id = account.get("calendar_id", "primary")
+                    
+                    events = client.list_events(
+                        calendar_id=calendar_id,
+                        time_min=start.replace(tzinfo=timezone.utc) if not start.tzinfo else start,
+                        time_max=end.replace(tzinfo=timezone.utc) if not end.tzinfo else end
+                    )
+                    
+                    for e in events:
+                        conflicts.append({
+                            "account": account_name,
+                            "summary": e.summary,
+                            "start": e.start,
+                            "end": e.end,
+                        })
+            except Exception as e:
+                logger.debug(f"Error checking {account_name}: {e}")
+        
+        if conflicts:
+            output = [f"**⚠️ {len(conflicts)} conflict(en) gevonden:**\n"]
+            for c in conflicts:
+                output.append(f"• **{c['summary']}** [{c['account']}]")
+                if isinstance(c['start'], datetime):
+                    output.append(f"  🕐 {c['start'].strftime('%H:%M')} - {c['end'].strftime('%H:%M')}")
+            return "\n".join(output)
+        else:
+            return f"✅ Geen conflicten gevonden voor dit tijdslot."
     
     async def _create_event(self, **kwargs) -> str:
         """Create a calendar event with optional Meet link and WhatsApp reminder."""
@@ -492,10 +723,10 @@ _Technische fout is gelogd op de server._"""
         start_str = kwargs.get("start")
         end_str = kwargs.get("end")
         calendar_name = kwargs.get("calendar")
-        # Default to adding Meet link if Google Workspace is available
         add_meet_link = kwargs.get("add_meet_link", self._google_workspace_available)
         whatsapp_reminder = kwargs.get("whatsapp_reminder")
         reminder_phone = kwargs.get("reminder_phone", self.default_reminder_phone)
+        check_conflicts = kwargs.get("check_conflicts", True)
         
         # Validate required fields
         if not summary:
@@ -512,6 +743,16 @@ _Technische fout is gelogd op de server._"""
         except ValueError as e:
             return f"Error parsing datetime: {e}"
         
+        # Check for conflicts if requested
+        if check_conflicts:
+            conflict_result = await self._check_conflicts(
+                start=start_str,
+                end=end_str,
+                calendar=calendar_name
+            )
+            if "conflict" in conflict_result.lower():
+                return f"{conflict_result}\n\nWil je toch doorgaan met het inplannen? Gebruik dan check_conflicts: false"
+        
         # Check available calendars
         account_names = self._get_account_names()
         if not account_names:
@@ -522,21 +763,20 @@ _Technische fout is gelogd op de server._"""
             if len(account_names) == 1:
                 calendar_name = account_names[0]
             else:
-                # Multiple calendars - ask user to specify by name
                 names_list = ", ".join(f'"{n}"' for n in account_names)
                 return (
-                    f"**Which calendar should I use?**\n\n"
-                    f"Available calendars: {names_list}\n\n"
-                    f"Please specify with: `calendar: \"Werk\"` (or the name of your calendar)\n\n"
-                    f"Also, would you like:\n"
-                    f"- A **Google Meet link** added? (only for Google-type calendars)\n"
-                    f"- A **WhatsApp reminder** before the event? (e.g., 15 minutes before)"
+                    f"**Welke kalender wil je gebruiken?**\n\n"
+                    f"Beschikbaar: {names_list}\n\n"
+                    f"Geef op met: `calendar: \"Werk\"` (of de naam van je kalender)\n\n"
+                    f"Wil je ook:\n"
+                    f"- Een **Google Meet link** toevoegen?\n"
+                    f"- Een **WhatsApp herinnering** voor de afspraak? (bijv. 15 minuten van tevoren)"
                 )
         
         # Find the account by name
         account = self._get_account_by_name(calendar_name)
         if not account:
-            return f"Error: Calendar '{calendar_name}' not found. Available: {', '.join(account_names)}"
+            return f"Error: Kalender '{calendar_name}' niet gevonden. Beschikbaar: {', '.join(account_names)}"
         
         account_type = account.get("type", "")
         
@@ -549,25 +789,24 @@ _Technische fout is gelogd op de server._"""
             if not client:
                 return f"Error: Could not connect to calendar '{calendar_name}'"
             
-            if account_type == "google":
+            if account_type in ["google", "google_workspace"]:
+                calendar_id = account.get("calendar_id", "primary")
                 result = client.create_event(
                     summary=summary,
                     start=start,
                     end=end,
-                    calendar_id="primary",
+                    calendar_id=calendar_id,
                     description=kwargs.get("description"),
                     location=kwargs.get("location"),
                     attendees=kwargs.get("attendees"),
                     add_meet_link=add_meet_link
                 )
-                # Handle both dict (old client) and dataclass (GoogleWorkspaceClient)
                 if hasattr(result, 'meet_link'):
                     meet_link = result.meet_link
                 elif isinstance(result, dict):
                     meet_link = result.get("meet_link")
             
             elif account_type == "exchange":
-                # For Exchange, fetch a Meet link if requested and Google Workspace is available
                 location = kwargs.get("location", "")
                 description = kwargs.get("description", "")
                 
@@ -578,18 +817,16 @@ _Technische fout is gelogd op de server._"""
                         fetched_meet_link = meet_tool.get_quick_meet_link()
                         if fetched_meet_link:
                             meet_link = fetched_meet_link
-                            # Add to location
                             if location:
                                 location = f"{location} | {meet_link}"
                             else:
                                 location = meet_link
-                            # Add to description/body
                             if description:
                                 description = f"{description}\n\n🔗 Google Meet: {meet_link}"
                             else:
                                 description = f"🔗 Google Meet: {meet_link}"
                     except Exception as e:
-                        logger.warning(f"Could not fetch Meet link for Exchange event: {e}")
+                        logger.warning(f"Could not fetch Meet link: {e}")
                 
                 result = client.create_calendar_event(
                     subject=summary,
@@ -648,9 +885,9 @@ _Technische fout is gelogd op de server._"""
                     logger.error(f"Failed to schedule WhatsApp reminder: {e}")
         
         # Build response
-        output = [f"✅ **Event created:** {summary}"]
+        output = [f"✅ **Afspraak aangemaakt:** {summary}"]
         output.append(f"📅 {start.strftime('%Y-%m-%d %H:%M')} - {end.strftime('%H:%M')}")
-        output.append(f"📆 Calendar: {calendar_name}")
+        output.append(f"📆 Kalender: {calendar_name}")
         
         if kwargs.get("location"):
             output.append(f"📍 {kwargs['location']}")
@@ -658,11 +895,11 @@ _Technische fout is gelogd op de server._"""
         if meet_link:
             output.append(f"\n🔗 **Google Meet:** {meet_link}")
         
-        if result and result.get("htmlLink"):
+        if result and isinstance(result, dict) and result.get("htmlLink"):
             output.append(f"\n🔗 Event link: {result['htmlLink']}")
         
         if reminder_scheduled:
-            output.append(f"\n⏰ WhatsApp reminder set for {whatsapp_reminder} minutes before")
+            output.append(f"\n⏰ WhatsApp herinnering ingesteld voor {whatsapp_reminder} minuten van tevoren")
         
         return "\n".join(output)
     
@@ -674,7 +911,6 @@ _Technische fout is gelogd op de server._"""
         if not event_id:
             return "Error: event_id is required. Use 'list' action to find event IDs."
         
-        # Get calendar account
         account_names = self._get_account_names()
         if not account_names:
             return "Error: No calendar accounts configured."
@@ -696,7 +932,6 @@ _Technische fout is gelogd op de server._"""
             if not client:
                 return f"Error: Could not connect to calendar '{calendar_name}'"
             
-            # Parse optional datetime updates
             start = None
             end = None
             if kwargs.get("start"):
@@ -710,10 +945,11 @@ _Technische fout is gelogd op de server._"""
                 except ValueError:
                     return "Error: Invalid end datetime format"
             
-            if account_type == "google":
+            if account_type in ["google", "google_workspace"]:
+                calendar_id = account.get("calendar_id", "primary")
                 result = client.update_event(
                     event_id=event_id,
-                    calendar_id="primary",
+                    calendar_id=calendar_id,
                     summary=kwargs.get("summary"),
                     start=start,
                     end=end,
@@ -723,7 +959,7 @@ _Technische fout is gelogd op de server._"""
                 )
                 if result:
                     meet_info = f"\n🔗 Meet: {result.meet_link}" if result.meet_link else ""
-                    return f"✅ **Event updated:** {result.summary}{meet_info}"
+                    return f"✅ **Afspraak bijgewerkt:** {result.summary}{meet_info}"
                 return "❌ Failed to update event"
             
             elif account_type == "exchange":
@@ -736,7 +972,7 @@ _Technische fout is gelogd op de server._"""
                     location=kwargs.get("location")
                 )
                 if result:
-                    return f"✅ **Event updated**"
+                    return f"✅ **Afspraak bijgewerkt**"
                 return "❌ Failed to update event"
             
             elif account_type == "caldav":
@@ -749,7 +985,7 @@ _Technische fout is gelogd op de server._"""
                     location=kwargs.get("location")
                 )
                 if result:
-                    return f"✅ **Event updated**"
+                    return f"✅ **Afspraak bijgewerkt**"
                 return "❌ Failed to update event"
             
             else:
@@ -767,7 +1003,6 @@ _Technische fout is gelogd op de server._"""
         if not event_id:
             return "Error: event_id is required. Use 'list' action to find event IDs."
         
-        # Get calendar account
         account_names = self._get_account_names()
         if not account_names:
             return "Error: No calendar accounts configured."
@@ -789,22 +1024,23 @@ _Technische fout is gelogd op de server._"""
             if not client:
                 return f"Error: Could not connect to calendar '{calendar_name}'"
             
-            if account_type == "google":
-                result = client.delete_event(event_id=event_id, calendar_id="primary")
+            if account_type in ["google", "google_workspace"]:
+                calendar_id = account.get("calendar_id", "primary")
+                result = client.delete_event(event_id=event_id, calendar_id=calendar_id)
                 if result:
-                    return "✅ **Event deleted**"
+                    return "✅ **Afspraak verwijderd**"
                 return "❌ Failed to delete event"
             
             elif account_type == "exchange":
                 result = client.delete_calendar_event(event_id=event_id)
                 if result:
-                    return "✅ **Event deleted**"
+                    return "✅ **Afspraak verwijderd**"
                 return "❌ Failed to delete event"
             
             elif account_type == "caldav":
                 result = client.delete_event(event_uid=event_id)
                 if result:
-                    return "✅ **Event deleted**"
+                    return "✅ **Afspraak verwijderd**"
                 return "❌ Failed to delete event"
             
             else:
