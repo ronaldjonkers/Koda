@@ -61,17 +61,19 @@ class ImageGenerationTool(BaseTool):
     """
     Generate images using AI models from various providers.
     
-    Providers:
-    - pollinations: FREE, no API key needed. Uses Stable Diffusion / FLUX
-    - openrouter: Uses your existing OpenRouter API key. Models like FLUX, DALL-E
-    - stability: Requires Stability AI API key. High quality images
-    - gemini: Google Gemini Imagen (Nana Banana) - requires API key
+    Providers (in priority order - best quality first):
+    - gemini: BEST quality (Google Imagen/Nana Banana) - requires API key
+    - stability: High quality images - requires Stability AI API key
+    - openrouter: Good quality - uses existing OpenRouter API key
+    - together: Good quality - requires Together AI API key
+    - pollinations: FREE fallback, no API key needed (Stable Diffusion / FLUX)
     
-    The tool automatically selects the best available provider based on:
-    1. Explicit provider choice
-    2. Configured API keys
-    3. Cost considerations
-    4. Quality requirements
+    The tool automatically selects the best available provider based on quality:
+    1. Gemini (best) - if API key configured
+    2. Stability AI - if API key configured
+    3. OpenRouter - if API key configured
+    4. Together AI - if API key configured
+    5. Pollinations (free fallback) - always available
     
     Generated images are saved to ~/.koda/workspace/generated_images/
     
@@ -83,7 +85,7 @@ class ImageGenerationTool(BaseTool):
     
     Parameters for 'generate':
     - prompt: Text description of the image to generate
-    - provider: Which provider to use (auto-selected if not specified)
+    - provider: Which provider to use (auto-selected if not specified - prefers best quality)
     - model: Specific model to use (provider-dependent)
     - width/height: Image dimensions (default: 1024x1024)
     - seed: Random seed for reproducibility (optional)
@@ -103,7 +105,7 @@ class ImageGenerationTool(BaseTool):
     """
     
     name = "image_generation"
-    description = """Generate images using AI models. Supports multiple providers including free options.
+    description = """Generate images using AI models. Supports multiple providers with automatic quality-based selection.
 
 Use this to:
 - Create illustrations, artwork, and concept art
@@ -111,10 +113,14 @@ Use this to:
 - Create marketing images and social media content
 - Visualize ideas and concepts
 
-Providers (automatically selected):
-- pollinations: FREE, no setup needed (Stable Diffusion, FLUX)
-- openrouter: Uses your existing OpenRouter key (FLUX, DALL-E, etc.)
-- stability: High quality, requires Stability AI API key
+Providers (automatically selected - BEST quality first):
+- gemini: BEST quality (Google Imagen/Nana Banana) - requires API key
+- stability: High quality - requires Stability AI API key  
+- openrouter: Good quality - uses existing OpenRouter key
+- together: Good quality - requires Together AI key
+- pollinations: FREE fallback, no setup needed (Stable Diffusion, FLUX)
+
+The tool automatically picks the BEST available provider (Gemini > Stability > OpenRouter > Together > Pollinations).
 
 Actions:
 - generate: Create an image from text description
@@ -274,12 +280,8 @@ Examples:
                 raise APIKeyMissingError(provider.value)
             raise ValueError(f"Provider '{preferred}' not available (no API key configured)")
         
-        # Priority: Pollinations (free) > OpenRouter (existing key) > Gemini > others
-        if self.api_keys.get(ImageProvider.POLLINATIONS):
-            return ImageProvider.POLLINATIONS
-        
-        if self.api_keys.get(ImageProvider.OPENROUTER):
-            return ImageProvider.OPENROUTER
+        # Priority: Gemini (best quality) > Stability (high quality) > OpenRouter > Together > Pollinations (free fallback)
+        # When API keys are configured, prefer the best quality provider first
         
         if self.api_keys.get(ImageProvider.GEMINI):
             return ImageProvider.GEMINI
@@ -287,8 +289,15 @@ Examples:
         if self.api_keys.get(ImageProvider.STABILITY):
             return ImageProvider.STABILITY
         
+        if self.api_keys.get(ImageProvider.OPENROUTER):
+            return ImageProvider.OPENROUTER
+        
         if self.api_keys.get(ImageProvider.TOGETHER):
             return ImageProvider.TOGETHER
+        
+        # Free fallback option
+        if self.api_keys.get(ImageProvider.POLLINATIONS):
+            return ImageProvider.POLLINATIONS
         
         # No providers available - try to trigger callback
         if self.on_api_key_missing:
