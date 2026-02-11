@@ -17,6 +17,13 @@ interface TypingCommand {
   isTyping: boolean;
 }
 
+interface ImageCommand {
+  type: 'image';
+  to: string;
+  imageData: string; // base64 encoded
+  caption?: string;
+}
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -73,13 +80,16 @@ export class BridgeServer {
     await this.wa.connect();
   }
 
-  private async handleCommand(cmd: SendCommand | TypingCommand): Promise<void> {
+  private async handleCommand(cmd: SendCommand | TypingCommand | ImageCommand): Promise<void> {
     if (!this.wa) return;
     
     if (cmd.type === 'send') {
       await this.wa.sendMessage(cmd.to, cmd.text);
     } else if (cmd.type === 'typing') {
       await this.wa.sendTypingIndicator(cmd.to, cmd.isTyping);
+    } else if (cmd.type === 'image') {
+      const imageBuffer = Buffer.from(cmd.imageData, 'base64');
+      await this.wa.sendImage(cmd.to, imageBuffer, cmd.caption);
     }
   }
 

@@ -34,6 +34,8 @@ from koda.core.tools.smarthome import PhilipsHueTool
 from koda.core.tools.onepassword import OnePasswordTool
 from koda.core.tools.proactive import ProactiveAssistantTool
 from koda.core.tools.natural_language import NaturalLanguageTool
+from koda.core.tools.image_generation import ImageGenerationTool
+from koda.core.tools.public_events import PublicEventsTool
 from koda.plugins.loader import PluginLoader
 from koda.core.subagent import SubagentManager
 from koda.core.vector_memory import VectorMemoryStore
@@ -244,6 +246,23 @@ class AgentLoop:
         
         # Natural Language Processor
         self.tools.register(NaturalLanguageTool())
+        
+        # Image Generation
+        img_config = full_config.tools.image_generation if full_config else None
+        self.tools.register(ImageGenerationTool(
+            workspace=self.workspace,
+            openrouter_api_key=full_config.providers.openrouter.api_key if full_config else None,
+            stability_api_key=img_config.stability_ai.api_key if img_config and img_config.stability_ai.enabled else None,
+            together_api_key=None  # Not yet implemented
+        ))
+        
+        # Public Events (sports, concerts, F1, etc.)
+        events_config = full_config.tools.public_events if full_config else None
+        football_key = events_config.football_api_key if events_config else None
+        self.tools.register(PublicEventsTool(
+            workspace=self.workspace,
+            football_api_key=football_key
+        ))
     
     def _load_plugins(self) -> None:
         """Load plugins from the plugins directory and register their tools."""

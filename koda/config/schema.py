@@ -514,9 +514,38 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ImageProviderConfig(BaseModel):
+    """Configuration for a single image provider."""
+    enabled: bool = False
+    api_key: str = ""
+    default_model: str = ""
+
+
+class ImageGenerationConfig(BaseModel):
+    """Image generation configuration with multi-provider support."""
+    pollinations: ImageProviderConfig = Field(default_factory=lambda: ImageProviderConfig(enabled=True))
+    openrouter: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
+    stability_ai: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
+    replicate: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
+    default_provider: str = "pollinations"
+    save_images: bool = True
+    image_directory: str = "images"
+
+
+class PublicEventsConfig(BaseModel):
+    """Public events configuration."""
+    enabled: bool = True
+    football_api_key: str = ""  # Football-Data.org API key (optional)
+    auto_import_f1: bool = True
+    reminder_days_ahead: int = 3
+    categories: list[str] = Field(default_factory=lambda: ["sports", "music", "entertainment"])
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    image_generation: ImageGenerationConfig = Field(default_factory=ImageGenerationConfig)
+    public_events: PublicEventsConfig = Field(default_factory=PublicEventsConfig)
 
 
 class Config(BaseSettings):

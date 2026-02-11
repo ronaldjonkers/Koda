@@ -261,6 +261,14 @@ def _show_config():
     else:
         table.add_row("Webhook API", "Disabled")
     
+    # Image Generation
+    img_cfg = cfg.tools.image_generation
+    pollinations_status = "✓ Available (free)"
+    stability_status = "✓ Enabled" if img_cfg.stability_api_key else "Disabled"
+    table.add_row("Image Generation (Pollinations)", pollinations_status)
+    if img_cfg.stability_api_key:
+        table.add_row("Image Generation (Stability)", stability_status)
+    
     console.print(table)
 
 
@@ -1033,6 +1041,28 @@ def gateway(
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] Could not build bridge: {e}")
             
+            # Kill any existing bridge processes on port 3001
+            try:
+                # Find processes using port 3001
+                result = subprocess.run(
+                    ["lsof", "-ti:3001"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        if pid:
+                            try:
+                                subprocess.run(["kill", "-9", pid], capture_output=True)
+                                console.print(f"[dim]Killed old bridge process {pid}[/dim]")
+                            except:
+                                pass
+                    import time
+                    time.sleep(1)  # Give OS time to free the port
+            except Exception:
+                pass  # lsof might not be available
+            
             # Start the bridge
             if (bridge_dir / "dist" / "index.js").exists():
                 console.print("[dim]Starting WhatsApp bridge...[/dim]")
@@ -1225,8 +1255,8 @@ def gateway(
         console.print("[yellow]Warning: No channels enabled[/yellow]")
     
     cron_status = cron.status()
-    if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+    if cron_status.get("jobs_total", 0) > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_status['jobs_total']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
     console.print(f"[green]✓[/green] Reminder service: enabled")
@@ -1779,6 +1809,259 @@ def status():
 # ============================================================================
 
 daemon_app = typer.Typer(help="Manage Koda as a system daemon")
+# ============================================================================
+# Image Generation Setup
+# ============================================================================
+
+@app.command("setup-image")
+def setup_image(
+    provider: str = typer.Option("pollinations", "--provider", "-p", 
+        help="Provider: pollinations (free), openrouter, stability_ai, replicate"),
+    api_key: str = typer.Option("", "--api-key", "-k", help="API key (not needed for pollinations)"),
+    enable: bool = typer.Option(True, "--enable/--disable", help="Enable/disable this provider"),
+    default: bool = typer.Option(False, "--default", "-d", help="Set as default provider"),
+):
+    """Configure image generation providers.
+    
+    Providers:
+    - pollinations: Free, no API key needed. Uses Stable Diffusion/FLUX models.
+    - openrouter: Uses your existing OpenRouter API key. Supports multiple models.
+    - stability_ai: Official Stability AI API. Requires API key.
+    - replicate: Replicate platform API. Requires API key.
+    
+    Examples:
+        koda setup-image --provider pollinations
+        koda setup-image --provider openrouter --default
+        koda setup-image --provider stability_ai --api-key sk-xxx
+        koda setup-image --provider replicate --api-key r8_xxx --default
+    """
+    from pathlib import Path
+    from koda.config import get_config, save_config
+    from koda.config.schema import ImageProviderConfig
+    
+    valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate"]
+    if provider not in valid_providers:
+        console.print(f"[red]❌ Invalid provider: {provider}[/red]")
+        console.print(f"Valid options: {', '.join(valid_providers)}")
+        raise typer.Exit(1)
+    
+    console.print(f"\n[bold cyan]🎨 Image Generation Setup: {provider}[/bold cyan]\n")
+    
+    # Load current config
+    try:
+        config = get_config()
+    except Exception:
+        config = None
+    
+    if config is None:
+        console.print("[red]❌ Could not load config. Run 'koda init' first.[/red]")
+        raise typer.Exit(1)
+    
+    # Check if pollinations (free) and warn about limitations
+    if provider == "pollinations":
+        console.print("[green]✓ Pollinations is a free service - no API key needed![/green]")
+        console.print("[dim]  Supports: Stable Diffusion XL, FLUX models")
+        console.print("  Rate limits may apply for high usage.[/dim]\n")
+    elif not api_key:
+        console.print(f"[yellow]⚠️  API key required for {provider}[/yellow]")
+        console.print("Use --api-key to provide your key, or set it in the dashboard.")
+        raise typer.Exit(1)
+    
+    # Update the specific provider config
+    provider_config = ImageProviderConfig(
+        enabled=enable,
+        api_key=api_key,
+        default_model=""
+    )
+    
+    # Update config
+    if not hasattr(config, 'tools') or config.tools is None:
+        from koda.config.schema import ToolsConfig, ImageGenerationConfig
+        config.tools = ToolsConfig()
+    
+    if not hasattr(config.tools, 'image') or config.tools.image_generation is None:
+        from koda.config.schema import ImageGenerationConfig
+        config.tools.image_generation = ImageGenerationConfig()
+    
+    # Set the provider config
+    if provider == "pollinations":
+        config.tools.image_generation.pollinations = provider_config
+    elif provider == "openrouter":
+        config.tools.image_generation.openrouter = provider_config
+    elif provider == "stability_ai":
+        config.tools.image_generation.stability_ai = provider_config
+    elif provider == "replicate":
+        config.tools.image_generation.replicate = provider_config
+    
+    # Set as default if requested
+    if default:
+        config.tools.image_generation.default_provider = provider
+        console.print(f"[green]✓ Set {provider} as default provider[/green]")
+    
+    # Save config
+    try:
+        save_config(config)
+        status = "enabled" if enable else "disabled"
+        console.print(f"[green]✓ {provider} {status} successfully[/green]")
+        
+        # Show current status
+        console.print("\n[bold]Current Image Providers:[/bold]")
+        img_cfg = config.tools.image_generation
+        providers = [
+            ("pollinations", img_cfg.pollinations),
+            ("openrouter", img_cfg.openrouter),
+            ("stability_ai", img_cfg.stability_ai),
+            ("replicate", img_cfg.replicate),
+        ]
+        for name, pconf in providers:
+            is_default = " (default)" if config.tools.image_generation.default_provider == name else ""
+            status_icon = "[green]✓[/green]" if pconf.enabled else "[dim]○[/dim]"
+            has_key = "[dim]+key[/dim]" if pconf.api_key else ""
+            console.print(f"  {status_icon} {name}{is_default} {has_key}")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Failed to save config: {e}[/red]")
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Public Events
+# ============================================================================
+
+@app.command("events")
+def events_cmd(
+    action: str = typer.Argument("list", help="Action: list, import, add-team, remove-team, teams, search"),
+    source: str = typer.Option(None, "--source", "-s", help="Source for import: f1, football"),
+    team: str = typer.Option(None, "--team", "-t", help="Team name for football imports"),
+    days: int = typer.Option(30, "--days", "-d", help="Number of days to show"),
+    keyword: str = typer.Option(None, "--search", help="Search keyword"),
+):
+    """Manage public events like sports, concerts, and festivals.
+    
+    Import and get reminders about:
+    - Formula 1 races
+    - Football matches (Feyenoord, Ajax, etc.)
+    - Concerts and festivals
+    - Any iCal/ICS feed
+    
+    Examples:
+        koda events list                    # Show upcoming events
+        koda events list --days 7           # Show next 7 days
+        koda events import --source f1      # Import F1 calendar
+        koda events import --source football --team Feyenoord
+        koda events add-team "Manchester City"
+        koda events teams                   # List subscribed teams
+    """
+    import asyncio
+    from pathlib import Path
+    from koda.core.tools.public_events import PublicEventsTool
+    from koda.config.loader import load_config
+    
+    config = load_config()
+    workspace = Path.home() / ".koda" / "workspace"
+    football_key = getattr(config.tools, 'football_api_key', None)
+    
+    tool = PublicEventsTool(workspace, football_api_key=football_key)
+    
+    async def run():
+        if action == "list":
+            result = tool.execute(action="list", days=days)
+            console.print(result)
+        
+        elif action == "import":
+            if not source:
+                console.print("[red]❌ --source is required (f1, football, ical)[/red]")
+                raise typer.Exit(1)
+            
+            if source == "football" and not team:
+                console.print("[red]❌ --team is required for football imports[/red]")
+                raise typer.Exit(1)
+            
+            if source == "f1":
+                result = await tool.execute(action="import", source="f1")
+            elif source == "football":
+                result = await tool.execute(action="import", source="football", team=team)
+            else:
+                console.print(f"[red]❌ Unknown source: {source}[/red]")
+                raise typer.Exit(1)
+            
+            console.print(result)
+        
+        elif action == "add-team":
+            if not source:  # Use source as team name here
+                console.print("[red]❌ Team name is required[/red]")
+                raise typer.Exit(1)
+            result = await tool.execute(action="add_team", team=source)
+            console.print(result)
+        
+        elif action == "remove-team":
+            if not source:
+                console.print("[red]❌ Team name is required[/red]")
+                raise typer.Exit(1)
+            result = tool.execute(action="remove_team", team=source)
+            console.print(result)
+        
+        elif action == "teams":
+            result = tool.execute(action="teams")
+            console.print(result)
+        
+        elif action == "search":
+            if not keyword:
+                console.print("[red]❌ --search keyword is required[/red]")
+                raise typer.Exit(1)
+            result = tool.execute(action="search", keyword=keyword)
+            console.print(result)
+        
+        else:
+            console.print(f"[red]❌ Unknown action: {action}[/red]")
+            console.print("Valid actions: list, import, add-team, remove-team, teams, search")
+    
+    asyncio.run(run())
+
+
+@app.command("profile")
+def profile_cmd(
+    show: bool = typer.Option(True, "--show", help="Show profile"),
+    question: bool = typer.Option(False, "--question", "-q", help="Trigger a profiling question"),
+):
+    """View and manage your user profile.
+    
+    Koda learns about you over time to provide better suggestions.
+    The profile includes interests, preferences, work details, and more.
+    
+    Examples:
+        koda profile              # Show your profile
+        koda profile --question   # Answer a question to improve your profile
+    """
+    from koda.services.user_profiling import UserProfilingService
+    import asyncio
+    
+    if question:
+        async def ask():
+            service = UserProfilingService()
+            await service.start()
+            result = await service.ask_question()
+            await service.stop()
+            if result:
+                console.print("[green]✓[/green] Profiling question sent to your WhatsApp")
+            else:
+                console.print("[yellow]Not time for a new question yet[/yellow]")
+        
+        asyncio.run(ask())
+    else:
+        service = UserProfilingService()
+        service._init_storage()
+        summary = service.get_profile_summary()
+        suggestions = service.get_suggestions()
+        
+        console.print(summary)
+        
+        if suggestions:
+            console.print("\n[bold]💡 Suggestions:[/bold]")
+            for s in suggestions[:3]:
+                console.print(f"  • {s}")
+
+
 app.add_typer(daemon_app, name="daemon")
 
 

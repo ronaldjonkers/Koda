@@ -273,6 +273,23 @@ export class WhatsAppClient {
     }
   }
 
+  async sendImage(to: string, imageData: Buffer, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const result = await this.sock.sendMessage(to, {
+      image: imageData,
+      caption: caption || undefined,
+    });
+    
+    // Track the message ID to prevent processing it as incoming
+    if (result?.key?.id) {
+      this.sentMessageIds.add(result.key.id);
+      setTimeout(() => this.sentMessageIds.delete(result.key.id), 60000);
+    }
+  }
+
   async disconnect(): Promise<void> {
     if (this.sock) {
       this.sock.end(undefined);

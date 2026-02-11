@@ -142,6 +142,34 @@ class WhatsAppChannel(BaseChannel):
         except Exception as e:
             logger.debug(f"Typing indicator error (non-critical): {e}")
     
+    async def send_image(self, chat_id: str, image_data: bytes, caption: str | None = None) -> None:
+        """Send an image through WhatsApp.
+        
+        Args:
+            chat_id: WhatsApp JID to send to
+            image_data: Raw image bytes
+            caption: Optional caption text
+        """
+        if not self._ws or not self._connected:
+            logger.warning("⚠️ WhatsApp bridge not connected - cannot send image")
+            return
+        
+        try:
+            import base64
+            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            
+            payload = {
+                "type": "image",
+                "to": chat_id,
+                "imageData": image_b64,
+                "caption": caption
+            }
+            logger.info(f"📤 Sending image to {chat_id[:20]}... ({len(image_data)} bytes)")
+            await self._ws.send(json.dumps(payload))
+            logger.info(f"✅ Image sent successfully")
+        except Exception as e:
+            logger.error(f"❌ Error sending image: {e}")
+    
     def _load_contact_rules(self) -> None:
         """Load contact rules into a lookup dict."""
         self._contact_rules = {}
@@ -283,6 +311,23 @@ class WhatsAppChannel(BaseChannel):
 /removemail <name> - Remove email account
 /removecalendar <name> - Remove calendar account
 /removelinkedin - Remove LinkedIn account
+
+*Image Generation:*
+/imageproviders - Show image provider status
+/addimagekey <provider> <key> - Add API key for paid providers
+/setimageprovider <name> - Set default provider (pollinations, openrouter, etc)
+
+*Public Events:*
+/events - Show upcoming events (sports, concerts)
+/addevent <source> - Import events (f1, football <team>, ical <url>)
+/teams - List your subscribed teams
+/addteam <name> - Subscribe to a sports team
+/removeteam <name> - Unsubscribe from a team
+/search events <keyword> - Search for events
+
+*Your Profile:*
+/profile - Show your personal profile
+/learnme - Answer a question to help me learn about you
 
 *Schedules:*
 /schedules - Show all scheduled tasks
@@ -441,6 +486,89 @@ Example: `/addbrave BSA1234567890abcdef`"""
         
         elif command == "/googlemeet":
             return self._create_quick_meet()
+        
+        elif command == "/imageproviders":
+            return self._image_providers_status()
+        
+        elif command == "/addimagekey":
+            if not args:
+                return """❌ Usage: `/addimagekey <provider> <api_key>`
+
+Providers:
+• openrouter - Uses your OpenRouter key
+• stability - Stability AI API key
+• replicate - Replicate API key
+
+Example:
+`/addimagekey stability sk-xxx...`
+
+Pollinations (free) doesn't need a key:
+`/addimagekey pollinations`"""
+            return self._add_image_key(args)
+        
+        elif command == "/setimageprovider":
+            if not args:
+                return """❌ Usage: `/setimageprovider <provider>`
+
+Set the default image generation provider:
+• pollinations - Free, no signup needed (recommended)
+• openrouter - Uses existing OpenRouter key
+• stability - Stability AI (requires key)
+• replicate - Replicate platform (requires key)
+
+Example:
+`/setimageprovider pollinations`"""
+            return self._set_image_provider(args.strip().lower())
+        
+        # ============================================================================
+        # Public Events
+        # ============================================================================
+        
+        elif command == "/events":
+            return await self._list_public_events(args)
+        
+        elif command == "/addevent":
+            if not args:
+                return """❌ Usage: `/addevent <source>`
+
+Import public events:
+• `f1` - Formula 1 race calendar
+• `football <team>` - Football team matches
+• `ical <url>` - Import from iCal feed
+
+Examples:
+`/addevent f1`
+`/addevent football Feyenoord`
+`/addevent ical https://example.com/calendar.ics`"""
+            return await self._add_public_event(args)
+        
+        elif command == "/teams":
+            return self._list_teams()
+        
+        elif command == "/addteam":
+            if not args:
+                return "❌ Usage: `/addteam <team name>`\n\nExample: `/addteam Feyenoord`"
+            return await self._add_team(args)
+        
+        elif command == "/removeteam":
+            if not args:
+                return "❌ Usage: `/removeteam <team name>`"
+            return self._remove_team(args)
+        
+        elif command == "/search events":
+            if not args:
+                return "❌ Usage: `/search events <keyword>`"
+            return await self._search_public_events(args)
+        
+        # ============================================================================
+        # User Profile
+        # ============================================================================
+        
+        elif command == "/profile":
+            return self._show_user_profile()
+        
+        elif command == "/learnme":
+            return await self._trigger_profiling_question()
         
         return None  # Not a recognized command
     
@@ -966,6 +1094,312 @@ Of open het dashboard en ga naar de Google tab.
 https://developers.google.com/calendar/api/quickstart/python
 
 _Voor alleen Calendar zonder OAuth, gebruik /googlehelp_"""
+    
+    def _image_providers_status(self) -> str:
+        """Show image generation provider status."""
+        from koda.config.loader import load_config
+        config = load_config()
+        
+        img_cfg = getattr(config.tools, 'image_generation', None)
+        if not img_cfg:
+            return """🎨 *Image Generation Status*
+
+No providers configured yet.
+
+*Quick setup:*
+`/setimageprovider pollinations` - Free, no signup needed
+
+Or add a paid provider:
+`/addimagekey stability sk-xxx...`"""
+        
+        lines = ["🎨 *Image Generation Providers*\n"]
+        
+        providers = [
+            ("pollinations", img_cfg.pollinations, "🆓 Free"),
+            ("openrouter", img_cfg.openrouter, "🔑 Uses existing key"),
+            ("stability_ai", img_cfg.stability_ai, "💎 Paid"),
+            ("replicate", img_cfg.replicate, "💎 Paid"),
+        ]
+        
+        for name, pconf, note in providers:
+            if pconf.enabled:
+                has_key = "✓" if pconf.api_key else "○"
+                is_default = " (default)" if img_cfg.default_provider == name else ""
+                lines.append(f"✅ {name}{is_default} [{has_key}] - {note}")
+            else:
+                lines.append(f"○ {name} - {note}")
+        
+        lines.append(f"\n_Default: {img_cfg.default_provider}_")
+        lines.append("\n*Commands:*")
+        lines.append("• `/setimageprovider <name>` - Set default")
+        lines.append("• `/addimagekey <provider> <key>` - Add API key")
+        return "\n".join(lines)
+    
+    def _add_image_key(self, args: str) -> str:
+        """Add API key for an image provider."""
+        from koda.config.loader import load_config, save_config
+        from koda.config.schema import ImageProviderConfig
+        
+        parts = args.split(maxsplit=1)
+        if len(parts) < 1:
+            return "❌ Provider name required. Usage: `/addimagekey <provider> [api_key]`"
+        
+        provider = parts[0].lower()
+        api_key = parts[1] if len(parts) > 1 else ""
+        
+        valid_providers = ["pollinations", "openrouter", "stability", "stability_ai", "replicate"]
+        if provider not in valid_providers:
+            return f"❌ Invalid provider. Valid: {', '.join(valid_providers)}"
+        
+        # Normalize provider name
+        if provider == "stability":
+            provider = "stability_ai"
+        
+        # Pollinations doesn't need a key
+        if provider == "pollinations":
+            api_key = ""
+        elif not api_key:
+            return f"❌ API key required for {provider}. Usage: `/addimagekey {provider} <key>`"
+        
+        config = load_config()
+        
+        # Ensure tools.image exists
+        if not hasattr(config, 'tools') or config.tools is None:
+            from koda.config.schema import ToolsConfig
+            config.tools = ToolsConfig()
+        if not hasattr(config.tools, 'image') or config.tools.image_generation is None:
+            from koda.config.schema import ImageGenerationConfig
+            config.tools.image_generation = ImageGenerationConfig()
+        
+        # Update provider config
+        pconf = ImageProviderConfig(enabled=True, api_key=api_key, default_model="")
+        
+        if provider == "pollinations":
+            config.tools.image_generation.pollinations = pconf
+        elif provider == "openrouter":
+            config.tools.image_generation.openrouter = pconf
+        elif provider == "stability_ai":
+            config.tools.image_generation.stability_ai = pconf
+        elif provider == "replicate":
+            config.tools.image_generation.replicate = pconf
+        
+        # Set as default if no default set yet
+        if not config.tools.image_generation.default_provider:
+            config.tools.image_generation.default_provider = provider
+        
+        save_config(config)
+        
+        key_status = "(with API key)" if api_key else "(free, no key needed)"
+        return f"✅ *{provider}* enabled {key_status}\n\nUse `/setimageprovider {provider}` to make it the default."
+    
+    def _set_image_provider(self, provider: str) -> str:
+        """Set the default image provider."""
+        from koda.config.loader import load_config, save_config
+        
+        valid_providers = ["pollinations", "openrouter", "stability_ai", "replicate"]
+        if provider not in valid_providers:
+            return f"❌ Invalid provider. Valid: {', '.join(valid_providers)}"
+        
+        config = load_config()
+        
+        # Ensure tools.image exists
+        if not hasattr(config, 'tools') or config.tools is None:
+            from koda.config.schema import ToolsConfig
+            config.tools = ToolsConfig()
+        if not hasattr(config.tools, 'image') or config.tools.image_generation is None:
+            from koda.config.schema import ImageGenerationConfig
+            config.tools.image_generation = ImageGenerationConfig()
+        
+        # Enable the provider if not already
+        if provider == "pollinations":
+            if not config.tools.image_generation.pollinations.enabled:
+                config.tools.image_generation.pollinations.enabled = True
+        elif provider == "openrouter":
+            if not config.tools.image_generation.openrouter.enabled:
+                config.tools.image_generation.openrouter.enabled = True
+        elif provider == "stability_ai":
+            if not config.tools.image_generation.stability_ai.enabled:
+                config.tools.image_generation.stability_ai.enabled = True
+        elif provider == "replicate":
+            if not config.tools.image_generation.replicate.enabled:
+                config.tools.image_generation.replicate.enabled = True
+        
+        config.tools.image_generation.default_provider = provider
+        save_config(config)
+        
+        provider_info = {
+            "pollinations": "🆓 Free, no signup needed",
+            "openrouter": "🔑 Uses your existing OpenRouter key",
+            "stability_ai": "💎 Requires Stability AI API key",
+            "replicate": "💎 Requires Replicate API key",
+        }
+        
+        return f"✅ Default image provider set to: *{provider}*\n{provider_info.get(provider, '')}\n\nYou can now generate images! Try:\n\"Generate an image of a sunset\""
+    
+    # ============================================================================
+    # Public Events Methods
+    # ============================================================================
+    
+    async def _list_public_events(self, args: str) -> str:
+        """List upcoming public events."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            days = 30
+            category = None
+            
+            # Parse args
+            if args:
+                parts = args.split()
+                for i, part in enumerate(parts):
+                    if part.isdigit():
+                        days = int(part)
+                    elif part in ["sports", "music", "entertainment"]:
+                        category = part
+            
+            return tool.execute(action="list", days=days, category=category or "all")
+        except Exception as e:
+            logger.error(f"Error listing events: {e}")
+            return f"❌ Error loading events: {e}"
+    
+    async def _add_public_event(self, args: str) -> str:
+        """Import public events from a source."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            parts = args.split(maxsplit=1)
+            source = parts[0].lower()
+            
+            if source == "f1":
+                return await tool.execute(action="import", source="f1")
+            
+            elif source == "football":
+                team = parts[1] if len(parts) > 1 else ""
+                if not team:
+                    return "❌ Please specify a team name. Example: `/addevent football Feyenoord`"
+                return await tool.execute(action="import", source="football", team=team)
+            
+            elif source == "ical":
+                url = parts[1] if len(parts) > 1 else ""
+                if not url:
+                    return "❌ Please provide an iCal URL. Example: `/addevent ical https://...`"
+                return await tool.execute(action="import", source="ical", ical_url=url)
+            
+            else:
+                return f"❌ Unknown source: {source}. Try: f1, football, ical"
+        except Exception as e:
+            logger.error(f"Error adding event: {e}")
+            return f"❌ Error: {e}"
+    
+    def _list_teams(self) -> str:
+        """List subscribed sports teams."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            return tool.execute(action="teams")
+        except Exception as e:
+            logger.error(f"Error listing teams: {e}")
+            return f"❌ Error: {e}"
+    
+    async def _add_team(self, team_name: str) -> str:
+        """Subscribe to a sports team."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            return await tool.execute(action="add_team", team=team_name)
+        except Exception as e:
+            logger.error(f"Error adding team: {e}")
+            return f"❌ Error: {e}"
+    
+    def _remove_team(self, team_name: str) -> str:
+        """Unsubscribe from a sports team."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            return tool.execute(action="remove_team", team=team_name)
+        except Exception as e:
+            logger.error(f"Error removing team: {e}")
+            return f"❌ Error: {e}"
+    
+    async def _search_public_events(self, keyword: str) -> str:
+        """Search for public events."""
+        try:
+            from pathlib import Path
+            from koda.core.tools.public_events import PublicEventsTool
+            
+            workspace = Path.home() / ".koda" / "workspace"
+            tool = PublicEventsTool(workspace)
+            
+            return tool.execute(action="search", keyword=keyword)
+        except Exception as e:
+            logger.error(f"Error searching events: {e}")
+            return f"❌ Error: {e}"
+    
+    # ============================================================================
+    # User Profile Methods
+    # ============================================================================
+    
+    def _show_user_profile(self) -> str:
+        """Show the user's profile."""
+        try:
+            from koda.services.user_profiling import UserProfilingService
+            
+            service = UserProfilingService()
+            # Initialize without async to load existing data
+            service._init_storage()
+            
+            summary = service.get_profile_summary()
+            suggestions = service.get_suggestions()
+            
+            result = summary
+            if suggestions:
+                result += "\n\n💡 *Suggestions based on your profile:*\n"
+                for s in suggestions[:3]:
+                    result += f"• {s}\n"
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error showing profile: {e}")
+            return f"❌ Error loading profile: {e}"
+    
+    async def _trigger_profiling_question(self) -> str:
+        """Trigger a profiling question."""
+        try:
+            from koda.services.user_profiling import UserProfilingService
+            
+            service = UserProfilingService()
+            await service.start()
+            
+            question = await service.ask_question()
+            await service.stop()
+            
+            if question:
+                return "📝 I've sent you a question to help me learn more about you!"
+            else:
+                return "ℹ️ Not time for a new question yet. I ask 1-2 questions per week.\n\nUse /profile to see what I already know about you."
+        except Exception as e:
+            logger.error(f"Error triggering profiling question: {e}")
+            return f"❌ Error: {e}"
     
     async def _auto_reload_config(self) -> None:
         """Automatically reload configuration after changes."""
