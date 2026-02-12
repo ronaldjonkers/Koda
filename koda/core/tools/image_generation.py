@@ -710,16 +710,128 @@ Examples:
         height: int = 1024,
         aspect_ratio: str | None = None
     ) -> GeneratedImage:
-        """Generate image using Google Gemini Imagen (Nana Banana)."""
+        """Generate image using Google Gemini.
+        
+        Supports two approaches:
+        1. Imagen models (imagen-3.*) via the predict endpoint
+        2. Gemini models (gemini-2.0-flash-exp) via generateContent with image output
+        """
         
         api_key = self.api_keys.get(ImageProvider.GEMINI)
         if not api_key:
             raise ValueError("Gemini API key not configured")
         
-        # Use Imagen 3 by default
-        model = model or "imagen-3.0-generate-002"
+        # Determine which approach to use
+        model = model or "gemini-2.0-flash-preview-image-generation"
+        use_generate_content = model.startswith("gemini-")
         
-        # Map dimensions to aspect ratio for Gemini
+        if use_generate_content:
+            return await self._generate_gemini_native(prompt, model, api_key, width, height)
+        else:
+            return await self._generate_gemini_imagen(prompt, model, api_key, width, height, aspect_ratio)
+    
+    async def _generate_gemini_native(
+        self,
+        prompt: str,
+        model: str,
+        api_key: str,
+        width: int = 1024,
+        height: int = 1024,
+    ) -> GeneratedImage:
+        """Generate image using Gemini native image generation (generateContent)."""
+        
+        headers = {"Content-Type": "application/json"}
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": f"Generate an image: {prompt}"}]
+            }],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"]
+            }
+        }
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        
+        logger.info(f"Calling Gemini generateContent API with model: {model}")
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract image from response parts
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise ValueError("No response from Gemini")
+                
+                parts = candidates[0].get("content", {}).get("parts", [])
+                
+                image_data_base64 = None
+                mime_type = "image/png"
+                for part in parts:
+                    if "inlineData" in part:
+                        image_data_base64 = part["inlineData"].get("data", "")
+                        mime_type = part["inlineData"].get("mimeType", "image/png")
+                        break
+                
+                if not image_data_base64:
+                    raise ValueError("No image returned from Gemini. The model may have returned text only.")
+                
+                image_data = base64.b64decode(image_data_base64)
+                
+                # Determine file extension from mime type
+                ext_map = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+                ext = ext_map.get(mime_type, ".png")
+                
+                # Save to file
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                prompt_hash = hashlib.md5(prompt.encode()).hexdigest()[:8]
+                filename = f"gemini_{timestamp}_{prompt_hash}{ext}"
+                local_path = self.output_dir / filename
+                local_path.write_bytes(image_data)
+                
+                return GeneratedImage(
+                    url=None,
+                    base64_data=f"data:{mime_type};base64,{image_data_base64}",
+                    local_path=local_path,
+                    provider="gemini",
+                    model=model,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    seed=None,
+                    cost=0.04
+                )
+                
+            except httpx.HTTPStatusError as e:
+                error_text = e.response.text[:500]
+                logger.error(f"Gemini API error: {e.response.status_code} - {error_text}")
+                if "API key not valid" in error_text or "API_KEY_INVALID" in error_text:
+                    raise ValueError("Invalid Gemini API key. Please check your key at https://aistudio.google.com/app/apikey")
+                elif "quota" in error_text.lower():
+                    raise ValueError("Gemini API quota exceeded.")
+                else:
+                    raise ValueError(f"Gemini API error: {e.response.status_code} - {error_text[:200]}")
+            except Exception as e:
+                import traceback
+                logger.error(f"Gemini request failed: {e}")
+                logger.debug(f"Gemini traceback: {traceback.format_exc()}")
+                raise
+    
+    async def _generate_gemini_imagen(
+        self,
+        prompt: str,
+        model: str,
+        api_key: str,
+        width: int = 1024,
+        height: int = 1024,
+        aspect_ratio: str | None = None
+    ) -> GeneratedImage:
+        """Generate image using Gemini Imagen models via predict endpoint."""
+        
+        # Map dimensions to aspect ratio for Imagen
         aspect_map = {
             (1024, 1024): "1:1",
             (1344, 768): "16:9",
@@ -730,36 +842,25 @@ Examples:
         
         gemini_aspect = aspect_map.get((width, height), aspect_ratio or "1:1")
         
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         
-        # Gemini Imagen API payload
+        # Imagen API uses ?key= parameter, NOT Bearer auth
         payload = {
-            "instances": [
-                {
-                    "prompt": prompt,
-                }
-            ],
+            "instances": [{"prompt": prompt}],
             "parameters": {
                 "sampleCount": 1,
                 "aspectRatio": gemini_aspect,
-                "outputOptions": {
-                    "mimeType": "image/png"
-                }
+                "outputOptions": {"mimeType": "image/png"}
             }
         }
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predict?key={api_key}"
         
         logger.info(f"Calling Gemini Imagen API with model: {model}")
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
-                response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predict",
-                    headers=headers,
-                    json=payload
-                )
+                response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -768,7 +869,6 @@ Examples:
                 if not predictions:
                     raise ValueError("No image returned from Gemini Imagen")
                 
-                # Gemini returns base64 encoded image
                 image_data_base64 = predictions[0].get("bytesBase64Encoded", "")
                 if not image_data_base64:
                     raise ValueError("Empty image data from Gemini Imagen")
@@ -783,9 +883,6 @@ Examples:
                 local_path = self.output_dir / filename
                 local_path.write_bytes(image_data)
                 
-                # Estimate cost (Gemini is roughly $0.03-0.06 per image depending on resolution)
-                cost = 0.04
-                
                 return GeneratedImage(
                     url=None,
                     base64_data=base64_data,
@@ -795,22 +892,19 @@ Examples:
                     prompt=prompt,
                     width=width,
                     height=height,
-                    seed=None,  # Gemini doesn't expose seed
-                    cost=cost
+                    seed=None,
+                    cost=0.04
                 )
                 
             except httpx.HTTPStatusError as e:
-                error_text = e.response.text
+                error_text = e.response.text[:500]
                 logger.error(f"Gemini Imagen API error: {e.response.status_code} - {error_text}")
-                
-                # Check for specific error messages
-                if "API key not valid" in error_text:
-                    raise ValueError("Invalid Gemini API key. Please check your key.")
+                if "API key not valid" in error_text or "API_KEY_INVALID" in error_text:
+                    raise ValueError("Invalid Gemini API key. Please check your key at https://aistudio.google.com/app/apikey")
                 elif "quota" in error_text.lower():
                     raise ValueError("Gemini API quota exceeded.")
                 else:
                     raise ValueError(f"Gemini Imagen API error: {e.response.status_code}")
-                    
             except Exception as e:
                 import traceback
                 logger.error(f"Gemini Imagen request failed: {e}")
@@ -959,9 +1053,10 @@ Examples:
                 "turbo (faster, lower quality)",
             ],
             "gemini": [
-                "imagen-3.0-generate-002 (latest, high quality)",
-                "imagen-3.0-generate-001 (stable)",
-                "imagen-3.0-fast-generate-001 (faster generation)",
+                "gemini-2.0-flash-preview-image-generation (default, native image generation)",
+                "imagen-3.0-generate-002 (Imagen 3, high quality)",
+                "imagen-3.0-generate-001 (Imagen 3, stable)",
+                "imagen-3.0-fast-generate-001 (Imagen 3, faster)",
             ],
             "openrouter": [
                 "black-forest-labs/flux.2-pro (best quality)",

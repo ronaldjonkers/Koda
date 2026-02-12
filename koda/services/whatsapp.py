@@ -68,7 +68,7 @@ class WhatsAppChannel(BaseChannel):
         
         while self._running:
             try:
-                async with websockets.connect(bridge_url) as ws:
+                async with websockets.connect(bridge_url, max_size=100 * 1024 * 1024) as ws:
                     self._ws = ws
                     self._connected = True
                     logger.info("✅ Connected to WhatsApp bridge - listening for messages...")
@@ -2347,6 +2347,10 @@ The account is now active."""
                 content=file_description,
                 metadata=metadata
             )
+        
+        elif msg_type == "sent":
+            # Acknowledgement from bridge that our command was processed
+            logger.debug(f"Bridge confirmed command sent")
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")
