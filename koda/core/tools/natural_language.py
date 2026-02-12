@@ -422,27 +422,27 @@ which other tools to call to fulfill the user's request.
         suggestions = []
         
         if 7 <= hour < 10:
-            suggestions.append("🌅 Goedemorgen! Wil je je dagoverzicht zien?")
-            suggestions.append("📅 Check je agenda voor vandaag")
+            suggestions.append("🌅 Good morning! Want to see your daily overview?")
+            suggestions.append("📅 Check your calendar for today")
         elif 10 <= hour < 12:
-            suggestions.append("📧 Bekijk belangrijke emails")
+            suggestions.append("📧 Check important emails")
         elif 12 <= hour < 14:
-            suggestions.append("🍽️ Lunchtijd! Check of je afspraken hebt vanmiddag")
+            suggestions.append("🍽️ Lunchtime! Check if you have appointments this afternoon")
         elif 14 <= hour < 17:
-            suggestions.append("📅 Komende afspraken bekijken")
+            suggestions.append("📅 View upcoming appointments")
         elif 17 <= hour < 19:
-            suggestions.append("🌆 Einde werkdag - samenvatting van morgen bekijken?")
+            suggestions.append("🌆 End of workday - check tomorrow's schedule?")
         else:
-            suggestions.append("📅 Agenda voor morgen bekijken")
+            suggestions.append("📅 View tomorrow's calendar")
         
         # Add context-specific suggestions
         if context:
             if "meeting" in context.lower() or "afspraak" in context.lower():
-                suggestions.append("🤔 Moet je nog een meeting inplannen?")
+                suggestions.append("🤔 Need to schedule a meeting?")
             if "birthday" in context.lower() or "verjaardag" in context.lower():
-                suggestions.append("🎂 Komende verjaardagen bekijken")
+                suggestions.append("🎂 View upcoming birthdays")
         
-        lines = ["**💡 Suggesties:**\n"]
+        lines = ["**💡 Suggestions:**\n"]
         for i, s in enumerate(suggestions[:3], 1):
             lines.append(f"{i}. {s}")
         
@@ -450,37 +450,37 @@ which other tools to call to fulfill the user's request.
     
     async def _examples(self) -> str:
         """Show example natural language commands."""
-        return """**🗣️ Voorbeelden van natuurlijke commando's:**
+        return """**🗣️ Examples of natural language commands:**
 
-**Agenda & Afspraken:**
-• "Hoe ziet mijn dag eruit?" / "What does my day look like?"
-• "Wat staat er deze week op de agenda?"
-• "Plan een meeting met John morgen om 14:00"
-• "Heb ik morgen tijd om 15:00?"
-• "Wat komt er aan?"
+**Calendar & Appointments:**
+• "What does my day look like?"
+• "What's on the calendar this week?"
+• "Schedule a meeting with John tomorrow at 2pm"
+• "Am I free tomorrow at 3pm?"
+• "What's coming up?"
 
-**Herinneringen:**
-• "Herinner me om morgen de belasting te doen"
+**Reminders:**
+• "Remind me to do taxes tomorrow"
 • "Remind me to call mom in 30 minutes"
-• "Laat me niet vergeten om de presentatie te maken"
+• "Don't let me forget to prepare the presentation"
 
 **Email:**
-• "Heb ik belangrijke emails?"
-• "Check mijn inbox"
-• "Stuur een email aan Peter over het project"
+• "Do I have important emails?"
+• "Check my inbox"
+• "Send an email to Peter about the project"
 
-**Verjaardagen:**
-• "Zijn er binnenkort verjaardagen?"
-• "Wanneer is Anna jarig?"
-• "Feliciteer John met zijn verjaardag"
+**Birthdays:**
+• "Any birthdays coming up?"
+• "When is Anna's birthday?"
+• "Congratulate John on his birthday"
 
-**Contacten:**
-• "Zoek het telefoonnummer van Sarah"
+**Contacts:**
+• "Find Sarah's phone number"
 • "Find contact info for the marketing team"
 
-**Overzicht:**
-• "Goedemorgen" / "Morning briefing"
-• "Geef me een overzicht"
+**Overview:**
+• "Good morning" / "Morning briefing"
+• "Give me an overview"
 
 _You can speak naturally - I'll do my best to understand!_ 🎯
 """

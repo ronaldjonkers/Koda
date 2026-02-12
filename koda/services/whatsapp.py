@@ -107,16 +107,42 @@ class WhatsAppChannel(BaseChannel):
         self._load_contact_rules()
         logger.info("WhatsApp config reloaded (allow_from, contact_rules, etc.)")
     
+    @staticmethod
+    def _normalize_jid(chat_id: str) -> str:
+        """Normalize a phone number or JID to proper WhatsApp JID format.
+        
+        Ensures format is: <number>@s.whatsapp.net (for individual chats)
+        or <id>@g.us (for groups).
+        """
+        if not chat_id:
+            return chat_id
+        
+        # Already a proper JID
+        if "@" in chat_id:
+            return chat_id
+        
+        # Strip + prefix and any spaces/dashes
+        number = chat_id.replace("+", "").replace(" ", "").replace("-", "")
+        
+        return f"{number}@s.whatsapp.net"
+    
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
             logger.warning("⚠️ WhatsApp bridge not connected - cannot send message")
             return
         
+        if not msg.content:
+            logger.warning("⚠️ Skipping empty WhatsApp message")
+            return
+        
+        # Normalize chat_id to proper JID format
+        jid = self._normalize_jid(msg.chat_id)
+        
         try:
             payload = {
                 "type": "send",
-                "to": msg.chat_id,
+                "to": jid,
                 "text": msg.content
             }
             logger.info(f"📤 Sending WhatsApp message to {msg.chat_id[:20]}... ({len(msg.content)} chars)")
@@ -133,7 +159,7 @@ class WhatsAppChannel(BaseChannel):
         try:
             payload = {
                 "type": "typing",
-                "to": chat_id,
+                "to": self._normalize_jid(chat_id),
                 "isTyping": is_typing
             }
             await self._ws.send(json.dumps(payload))
@@ -160,7 +186,7 @@ class WhatsAppChannel(BaseChannel):
             
             payload = {
                 "type": "image",
-                "to": chat_id,
+                "to": self._normalize_jid(chat_id),
                 "imageData": image_b64,
                 "caption": caption
             }
@@ -189,7 +215,7 @@ class WhatsAppChannel(BaseChannel):
             
             payload = {
                 "type": "file",
-                "to": chat_id,
+                "to": self._normalize_jid(chat_id),
                 "fileData": file_b64,
                 "filename": filename,
                 "caption": caption
@@ -218,7 +244,7 @@ class WhatsAppChannel(BaseChannel):
             
             payload = {
                 "type": "video",
-                "to": chat_id,
+                "to": self._normalize_jid(chat_id),
                 "videoData": video_b64,
                 "caption": caption
             }
@@ -785,25 +811,25 @@ Examples:
         """Start LinkedIn setup with Playwright browser login."""
         return """🔗 *LinkedIn Setup (Browser Login)*
 
-De nieuwe LinkedIn integratie gebruikt een browser sessie voor meer stabiliteit.
+The LinkedIn integration uses a browser session for more stability.
 
-*Eenmalig setup:*
-1. Open een terminal op je computer
-2. Run dit commando:
+*One-time setup:*
+1. Open a terminal on your computer
+2. Run this command:
 ```
 koda setup-linkedin
 ```
-3. Log in via de browser die opent
-4. Druk Enter in de terminal als je klaar bent
+3. Log in via the browser that opens
+4. Press Enter in the terminal when done
 
-*Voordelen:*
-✅ Stabieler dan email/wachtwoord
-✅ Geen problemen met 2FA
-✅ Sessie blijft bewaard
-✅ Posting en analytics ondersteuning
+*Benefits:*
+✅ More stable than email/password
+✅ No issues with 2FA
+✅ Session is preserved
+✅ Posting and analytics support
 
-*Huidige status:*
-Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
+*Current status:*
+Use `/linkedinstatus` to check if the session is active."""
     
     def _remove_linkedin(self, config) -> str:
         """Remove LinkedIn configuration and browser profile."""
@@ -825,7 +851,7 @@ Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
         if browser_path.exists():
             try:
                 shutil.rmtree(browser_path)
-                removed.append("Browser sessie")
+                removed.append("Browser session")
             except Exception as e:
                 logger.error(f"Failed to remove browser profile: {e}")
         
@@ -839,11 +865,11 @@ Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
         style_path = Path.home() / ".koda" / "linkedin_style.json"
         if style_path.exists():
             style_path.unlink()
-            removed.append("Stijl profiel")
+            removed.append("Style profile")
         
         if removed:
-            return f"✅ LinkedIn verwijderd:\n• " + "\n• ".join(removed) + "\n\nGebruik `/addlinkedin` om opnieuw te configureren."
-        return "ℹ️ LinkedIn was niet geconfigureerd."
+            return f"✅ LinkedIn removed:\n• " + "\n• ".join(removed) + "\n\nUse `/addlinkedin` to reconfigure."
+        return "ℹ️ LinkedIn was not configured."
     
     def _reset_linkedin(self) -> str:
         """Reset LinkedIn by clearing browser profile for fresh login."""
@@ -858,7 +884,7 @@ Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
             
             if browser_path.exists():
                 shutil.rmtree(browser_path)
-                cleared.append("Browser sessie")
+                cleared.append("Browser session")
             
             if cookies_path.exists():
                 cookies_path.unlink()
@@ -867,16 +893,16 @@ Gebruik `/linkedinstatus` om te checken of de sessie actief is."""
             if cleared:
                 return f"""✅ *LinkedIn Reset*
 
-Verwijderd: {', '.join(cleared)}
+Removed: {', '.join(cleared)}
 
-*Opnieuw inloggen:*
+*Log in again:*
 ```
 koda setup-linkedin
 ```
 
-Dit opent een browser voor handmatige login."""
+This opens a browser for manual login."""
             else:
-                return "ℹ️ Geen LinkedIn sessie gevonden. Run `koda setup-linkedin` om in te loggen."
+                return "ℹ️ No LinkedIn session found. Run `koda setup-linkedin` to log in."
         except Exception as e:
             logger.error(f"Error resetting LinkedIn: {e}")
             return f"❌ Error resetting LinkedIn: {e}"
@@ -888,11 +914,11 @@ Dit opent een browser voor handmatige login."""
             meet_tool = GoogleMeetTool()
             
             if not meet_tool._available:
-                return """❌ **Google Workspace niet verbonden**
+                return """❌ **Google Workspace not connected**
 
-Om Meet links te maken moet je eerst Google koppelen:
+To create Meet links you need to connect Google first:
 1. Run `koda setup-google` in terminal
-2. Of gebruik `/setupgoogle` voor instructies"""
+2. Or use `/setupgoogle` for instructions"""
             
             meet_link = meet_tool.get_quick_meet_link()
             
@@ -901,9 +927,9 @@ Om Meet links te maken moet je eerst Google koppelen:
 
 {meet_link}
 
-_Direct te gebruiken, verloopt niet._"""
+_Ready to use, does not expire._"""
             else:
-                return "❌ Kon geen Meet link aanmaken. Controleer Google verbinding met `/googlestatus`"
+                return "❌ Could not create Meet link. Check Google connection with `/googlestatus`"
         except Exception as e:
             logger.error(f"Failed to create Meet link: {e}")
             return f"❌ Error: {e}"
@@ -922,11 +948,11 @@ _Direct te gebruiken, verloopt niet._"""
             # Check if there are actual session files
             session_files = list(browser_path.glob("**/Cookies*")) + list(browser_path.glob("**/Local Storage*"))
             if session_files:
-                status_lines.append("✅ Browser sessie: Aanwezig")
+                status_lines.append("✅ Browser session: Active")
             else:
-                status_lines.append("⚠️ Browser sessie: Leeg (login nodig)")
+                status_lines.append("⚠️ Browser session: Empty (login required)")
         else:
-            status_lines.append("❌ Browser sessie: Niet gevonden")
+            status_lines.append("❌ Browser session: Not found")
         
         # Check style profile
         if style_path.exists():
@@ -936,48 +962,48 @@ _Direct te gebruiken, verloopt niet._"""
                     style = json.load(f)
                 lang = style.get("language", "?")
                 tone = style.get("tone", "?")
-                status_lines.append(f"✅ Stijl profiel: {lang}, {tone}")
+                status_lines.append(f"✅ Style profile: {lang}, {tone}")
             except:
-                status_lines.append("⚠️ Stijl profiel: Corrupt")
+                status_lines.append("⚠️ Style profile: Corrupt")
         else:
-            status_lines.append("ℹ️ Stijl profiel: Niet geleerd")
+            status_lines.append("ℹ️ Style profile: Not learned yet")
         
-        status_lines.append("\n*Commando's:*")
-        status_lines.append("• `koda setup-linkedin` - Inloggen")
-        status_lines.append("• `/resetlinkedin` - Sessie wissen")
-        status_lines.append("• `/removelinkedin` - Alles verwijderen")
+        status_lines.append("\n*Commands:*")
+        status_lines.append("• `koda setup-linkedin` - Log in")
+        status_lines.append("• `/resetlinkedin` - Clear session")
+        status_lines.append("• `/removelinkedin` - Remove everything")
         
         return "\n".join(status_lines)
     
     def _google_setup_help(self) -> str:
         """Return Google Calendar setup instructions."""
-        return """📅 *Google Calendar Setup (Eenvoudig)*
+        return """📅 *Google Calendar Setup (Simple)*
 
-Met deze methode koppel je Google Calendar zonder API keys of OAuth - net zo simpel als een mailclient!
+This method connects Google Calendar without API keys or OAuth - as simple as an email client!
 
-*Stap 1: 2-Stapsverificatie*
-Ga naar myaccount.google.com/security en zorg dat 2-Stapsverificatie AAN staat.
+*Step 1: 2-Step Verification*
+Go to myaccount.google.com/security and make sure 2-Step Verification is ON.
 
-*Stap 2: App Wachtwoord Maken*
-📖 Uitgebreide handleiding: https://support.google.com/mail/answer/185833
+*Step 2: Create App Password*
+📖 Detailed guide: https://support.google.com/mail/answer/185833
 
-Kort:
-1. Ga naar: myaccount.google.com/apppasswords
-2. Klik "App selecteren" → "Overige (aangepaste naam)"
+Short:
+1. Go to: myaccount.google.com/apppasswords
+2. Click "Select app" → "Other (custom name)"
 3. Type: "Koda"
-4. Klik "Genereren"
-5. Je krijgt een 16-letter code (bijv: abcd efgh ijkl mnop)
+4. Click "Generate"
+5. You'll get a 16-letter code (e.g.: abcd efgh ijkl mnop)
 
-*Stap 3: Koppelen*
-Stuur:
-`/addgoogle jouw.email@gmail.com abcdefghijklmnop`
+*Step 3: Connect*
+Send:
+`/addgoogle your.email@gmail.com abcdefghijklmnop`
 
-(zonder spaties in het wachtwoord)
+(without spaces in the password)
 
-*Belangrijk:*
-• Bewaar het wachtwoord veilig
-• Je kunt het intrekken via myaccount.google.com/apppasswords
-• Dit werkt onbeperkt (geen tokens die verlopen)"""
+*Important:*
+• Store the password safely
+• You can revoke it via myaccount.google.com/apppasswords
+• This works indefinitely (no expiring tokens)"""
     
     def _add_google_calendar(self, email: str, app_password: str) -> str:
         """Add Google Calendar via CalDAV with App Password."""
@@ -993,16 +1019,16 @@ Stuur:
             success, message = client.test_connection()
             
             if not success:
-                return f"""❌ *Verbinding mislukt*
+                return f"""❌ *Connection failed*
 
 {message}
 
-*Controleer:*
-• Is 2-Stapsverificatie aan?
-• Gebruik je een App Wachtwoord (16 letters)?
-• Is het email adres correct?
+*Check:*
+• Is 2-Step Verification enabled?
+• Are you using an App Password (16 letters)?
+• Is the email address correct?
 
-Gebruik /googlehelp voor uitleg."""
+Use /googlehelp for instructions."""
             
             # Save to config as a calendar account
             config = load_config()
@@ -1031,10 +1057,10 @@ Gebruik /googlehelp voor uitleg."""
             
             if existing_idx is not None:
                 config.integrations.accounts[existing_idx] = account
-                action = "bijgewerkt"
+                action = "updated"
             else:
                 config.integrations.accounts.append(account)
-                action = "toegevoegd"
+                action = "added"
             
             save_config(config)
             
@@ -1047,18 +1073,18 @@ Gebruik /googlehelp voor uitleg."""
 📧 Account: {email}
 📅 Calendars: {', '.join(cal_names)}
 
-Je kunt nu vragen:
-• "Wat staat er vandaag op mijn agenda?"
-• "Plan een meeting morgen om 14:00"
-• "Toon mijn afspraken deze week"
+You can now ask:
+• "What's on my calendar today?"
+• "Schedule a meeting tomorrow at 2pm"
+• "Show my appointments this week"
 
-_Tip: Je kunt meerdere Google accounts toevoegen!_"""
+_Tip: You can add multiple Google accounts!_"""
             
         except ImportError:
-            return "❌ caldav package niet geïnstalleerd. Run: pip install caldav"
+            return "❌ caldav package not installed. Run: pip install caldav"
         except Exception as e:
             logger.error(f"Error adding Google Calendar: {e}")
-            return f"❌ Error: {e}\n\nGebruik /googlehelp voor setup instructies."
+            return f"❌ Error: {e}\n\nUse /googlehelp for setup instructions."
     
     def _google_workspace_status(self) -> str:
         """Get Google Workspace connection status."""
@@ -1079,79 +1105,79 @@ _Tip: Je kunt meerdere Google accounts toevoegen!_"""
 
 {cal_list}
 
-*Beschikbare features:*
-• Gmail lezen en versturen
+*Available features:*
+• Read and send Gmail
 • Calendar events (incl. shared calendars)
-• Google Meet links aanmaken
+• Create Google Meet links
 
-_Gebruik /setupgoogle voor re-authorization_"""
+_Use /setupgoogle for re-authorization_"""
             
             elif status["configured"]:
                 return """⚠️ *Google Workspace: Not Authorized*
 
-Credentials bestand gevonden, maar nog niet geauthoriseerd.
+Credentials file found, but not yet authorized.
 
 Run in terminal:
 `koda setup-google`
 
-Of open het dashboard:
+Or open the dashboard:
 `http://localhost:8081` → Google tab"""
             
             else:
                 return """❌ *Google Workspace: Not Configured*
 
-Voor volledige Google integratie (Gmail + Calendar + Meet):
+For full Google integration (Gmail + Calendar + Meet):
 
-1. Maak een Google Cloud Project
-2. Download credentials.json naar ~/.koda/
+1. Create a Google Cloud Project
+2. Download credentials.json to ~/.koda/
 3. Run: `koda setup-google`
 
-_Of gebruik /googlehelp voor eenvoudige Calendar-only setup_"""
+_Or use /googlehelp for simple Calendar-only setup_"""
                 
         except ImportError:
-            return "❌ Google API libraries niet geïnstalleerd.\nRun: pip install google-api-python-client google-auth-oauthlib"
+            return "❌ Google API libraries not installed.\nRun: pip install google-api-python-client google-auth-oauthlib"
         except Exception as e:
             logger.error(f"Error getting Google status: {e}")
             return f"❌ Error: {e}"
     
     def _google_workspace_setup_help(self) -> str:
         """Return Google Workspace setup instructions."""
-        return """🔧 *Google Workspace Setup (Volledig)*
+        return """🔧 *Google Workspace Setup (Full)*
 
-Deze methode geeft toegang tot Gmail, Calendar (incl. shared), en Meet links.
+This method gives access to Gmail, Calendar (incl. shared), and Meet links.
 
-*Stap 1: Google Cloud Project*
-1. Ga naar: console.cloud.google.com
-2. Maak een project genaamd "Koda"
-3. Ga naar "APIs & Services" → "Library"
+*Step 1: Google Cloud Project*
+1. Go to: console.cloud.google.com
+2. Create a project named "Koda"
+3. Go to "APIs & Services" → "Library"
 4. Enable: Gmail API, Google Calendar API
 
-*Stap 2: OAuth Consent Screen*
-1. Ga naar "APIs & Services" → "OAuth consent screen"
-2. Kies "External"
-3. Vul app name "Koda" in
-4. Voeg je email toe als test user
+*Step 2: OAuth Consent Screen*
+1. Go to "APIs & Services" → "OAuth consent screen"
+2. Choose "External"
+3. Enter app name "Koda"
+4. Add your email as test user
 
-*Stap 3: Credentials*
-1. Ga naar "APIs & Services" → "Credentials"
-2. Klik "Create Credentials" → "OAuth client ID"
+*Step 3: Credentials*
+1. Go to "APIs & Services" → "Credentials"
+2. Click "Create Credentials" → "OAuth client ID"
 3. Type: "Desktop app"
-4. Download de JSON
-5. Hernoem naar `google_credentials.json`
-6. Zet in `~/.koda/google_credentials.json`
+4. Download the JSON
+5. Rename to `google_credentials.json`
+6. Place in `~/.koda/google_credentials.json`
 
-*Stap 4: Authoriseren*
+*Step 4: Authorize*
 Run in terminal:
 ```
 koda setup-google
 ```
 
-Of open het dashboard en ga naar de Google tab.
+Or open the dashboard and go to the Google tab.
 
-📖 *Uitgebreide handleiding:*
+📖 *Detailed guide:*
 https://developers.google.com/calendar/api/quickstart/python
 
-_Voor alleen Calendar zonder OAuth, gebruik /googlehelp_"""
+_For Calendar-only without OAuth, use /googlehelp_"""
     
     def _image_providers_status(self) -> str:
         """Show image generation provider status."""

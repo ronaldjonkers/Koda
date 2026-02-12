@@ -253,11 +253,11 @@ Parameters:
             )
             
             return (
-                f"✅ **Herinnering ingesteld**\n\n"
+                f"✅ **Reminder set**\n\n"
                 f"**{title}**\n"
                 f"📅 {when.strftime('%Y-%m-%d %H:%M')}\n"
-                f"🔔 Prioriteit: {priority}\n\n"
-                f"_Je krijgt een notificatie op tijd._"
+                f"🔔 Priority: {priority}\n\n"
+                f"_You'll receive a notification on time._"
             )
         else:
             return "❌ Proactive reminder service is not available. Please restart the gateway."
@@ -270,9 +270,9 @@ Parameters:
         pending = self.proactive_service.get_pending_reminders()
         
         if not pending:
-            return "📋 Geen actieve herinneringen.\n\n_Je kunt een herinnering toevoegen met 'add_reminder'_"
+            return "📋 No active reminders.\n\n_You can add a reminder with 'add_reminder'_"
         
-        lines = [f"📋 **{len(pending)} actieve herinnering(en):**\n"]
+        lines = [f"📋 **{len(pending)} active reminder(s):**\n"]
         
         for r in pending[:10]:  # Show max 10
             time_str = r.scheduled_time.strftime("%Y-%m-%d %H:%M")
@@ -283,9 +283,9 @@ Parameters:
             lines.append("")
         
         if len(pending) > 10:
-            lines.append(f"... en nog {len(pending) - 10} meer")
+            lines.append(f"... and {len(pending) - 10} more")
         
-        lines.append("\n_Gebruik 'snooze' of 'dismiss' met de ID om te beheren._")
+        lines.append("\n_Use 'snooze' or 'dismiss' with the ID to manage reminders._")
         return "\n".join(lines)
     
     async def _snooze(self, **kwargs) -> str:
@@ -303,9 +303,9 @@ Parameters:
         
         if success:
             new_time = datetime.now() + timedelta(minutes=minutes)
-            return f"⏰ Herinnering uitgesteld. Je krijgt een nieuwe notificatie over {minutes} minuten ({new_time.strftime('%H:%M')})."
+            return f"⏰ Reminder snoozed. You'll receive a new notification in {minutes} minutes ({new_time.strftime('%H:%M')})."
         else:
-            return f"❌ Herinnering met ID '{reminder_id}' niet gevonden. Gebruik 'list_pending' om de ID te zien."
+            return f"❌ Reminder with ID '{reminder_id}' not found. Use 'list_pending' to see available IDs."
     
     async def _dismiss(self, **kwargs) -> str:
         """Dismiss a reminder."""
@@ -320,9 +320,9 @@ Parameters:
         success = self.proactive_service.dismiss_reminder(reminder_id)
         
         if success:
-            return f"✅ Herinnering verwijderd."
+            return f"✅ Reminder dismissed."
         else:
-            return f"❌ Herinnering met ID '{reminder_id}' niet gevonden."
+            return f"❌ Reminder with ID '{reminder_id}' not found."
     
     async def _upcoming(self, **kwargs) -> str:
         """Check upcoming events."""
@@ -333,14 +333,14 @@ Parameters:
             
             client = GoogleWorkspaceClient()
             if not client.is_authorized:
-                return "❌ Google Workspace is niet geconfigureerd. Gebruik 'koda setup-google'."
+                return "❌ Google Workspace is not configured. Run 'koda setup google'."
             
             events = client.get_upcoming_events(hours=hours)
             
             if not events:
-                return f"📅 Geen afspraken in de komende {hours} uur."
+                return f"📅 No appointments in the next {hours} hours."
             
-            lines = [f"📅 **Komende {hours} uur** ({len(events)} afspraken):\n"]
+            lines = [f"📅 **Next {hours} hours** ({len(events)} appointments):\n"]
             
             for event in events[:10]:
                 time_str = event.start.strftime("%H:%M") if hasattr(event.start, 'strftime') else str(event.start)
@@ -352,17 +352,17 @@ Parameters:
                 if event.location:
                     lines.append(f"  📍 {event.location}")
                 if event.meet_link:
-                    lines.append(f"  🔗 Meet link beschikbaar")
+                    lines.append(f"  🔗 Meet link available")
                 lines.append("")
             
             if len(events) > 10:
-                lines.append(f"... en nog {len(events) - 10} meer")
+                lines.append(f"... and {len(events) - 10} more")
             
             return "\n".join(lines)
             
         except Exception as e:
             logger.error(f"Error getting upcoming events: {e}")
-            return f"❌ Kon agenda niet ophalen: {e}"
+            return f"❌ Could not retrieve calendar: {e}"
     
     async def _birthdays(self, **kwargs) -> str:
         """Check upcoming birthdays."""
@@ -375,9 +375,9 @@ Parameters:
             upcoming = client.get_upcoming_birthdays(days=days)
             
             if not upcoming:
-                return f"🎂 Geen verjaardagen in de komende {days} dagen."
+                return f"🎂 No birthdays in the next {days} days."
             
-            lines = [f"🎂 **Verjaardagen komende {days} dagen** ({len(upcoming)}):\n"]
+            lines = [f"🎂 **Birthdays in the next {days} days** ({len(upcoming)}):\n"]
             
             for contact in upcoming:
                 name = contact.get("name", "")
@@ -385,25 +385,25 @@ Parameters:
                 age = contact.get("age")
                 
                 if days_until == 0:
-                    when = "**VANDAAG!** 🎉"
+                    when = "**TODAY!** 🎉"
                 elif days_until == 1:
-                    when = "morgen"
+                    when = "tomorrow"
                 else:
-                    when = f"over {days_until} dagen"
+                    when = f"in {days_until} days"
                 
                 age_text = f" ({age})" if age else ""
                 lines.append(f"• **{name}**{age_text} - {when}")
             
-            lines.append("\n_Vergeet niet om te feliciteren! 🎂_")
+            lines.append("\n_Don't forget to congratulate them! 🎂_")
             return "\n".join(lines)
             
         except Exception as e:
             logger.error(f"Error getting birthdays: {e}")
-            return f"❌ Kon verjaardagen niet ophalen: {e}"
+            return f"❌ Could not retrieve birthdays: {e}"
     
     async def _morning_briefing(self) -> str:
         """Generate a morning briefing."""
-        lines = ["🌅 **Goedemorgen!**", ""]
+        lines = ["🌅 **Good morning!**", ""]
         
         # Today's events
         try:
@@ -414,15 +414,15 @@ Parameters:
             if client.is_authorized:
                 events = client.get_today_events()
                 if events:
-                    lines.append(f"📅 **Vandaag ({len(events)} afspraken):**")
+                    lines.append(f"📅 **Today ({len(events)} appointments):**")
                     for event in events[:5]:
                         time_str = event.start.strftime("%H:%M") if hasattr(event.start, 'strftime') else ""
                         lines.append(f"  • {time_str} - {event.summary}")
                     if len(events) > 5:
-                        lines.append(f"  ... en nog {len(events) - 5} meer")
+                        lines.append(f"  ... and {len(events) - 5} more")
                     lines.append("")
                 else:
-                    lines.append("📅 *Vandaag geen afspraken.*")
+                    lines.append("📅 *No appointments today.*")
                     lines.append("")
         except Exception as e:
             logger.debug(f"Could not get today's events: {e}")
@@ -435,7 +435,7 @@ Parameters:
             client = ICloudContactsClient(use_local=True)
             birthdays = client.get_birthdays_on_date(date.today())
             if birthdays:
-                lines.append("🎂 **Vandaag jarig:**")
+                lines.append("🎂 **Birthdays today:**")
                 for b in birthdays:
                     age = b.get("age", "")
                     age_text = f" ({age})" if age else ""
@@ -447,15 +447,15 @@ Parameters:
         # Add tip based on day of week
         weekday = datetime.now().weekday()
         tips = {
-            0: "💡 *Een goede start van de week!*",
-            1: "💡 *Productieve dinsdag gewenst!*",
-            2: "💡 *Halfweg de week!*",
-            3: "💡 *Bijna weekend!*",
-            4: "💡 *Laatste werkdag van de week!*",
-            5: "🎉 *Fijn weekend!*",
-            6: "🌟 *Geniet van je zondag!*"
+            0: "💡 *Great start to the week!*",
+            1: "💡 *Have a productive Tuesday!*",
+            2: "💡 *Midweek already!*",
+            3: "💡 *Almost weekend!*",
+            4: "💡 *Last workday of the week!*",
+            5: "🎉 *Enjoy your weekend!*",
+            6: "🌟 *Enjoy your Sunday!*"
         }
-        lines.append(tips.get(weekday, "💡 *Fijne dag gewenst!*"))
+        lines.append(tips.get(weekday, "💡 *Have a great day!*"))
         
         return "\n".join(lines)
     
@@ -469,21 +469,21 @@ Parameters:
         
         lines = ["🤖 **Proactive Assistant Status**\n"]
         
-        lines.append("**Configuratie:**")
-        lines.append(f"• Kalender herinneringen: {'✅' if config.calendar_reminders_enabled else '❌'}")
-        lines.append(f"• Verjaardag herinneringen: {'✅' if config.birthday_reminders_enabled else '❌'}")
-        lines.append(f"• Speciale gelegenheden: {'✅' if config.special_occasions_enabled else '❌'}")
-        lines.append(f"• Email samenvatting: {'✅' if config.email_digest_enabled else '❌'}")
-        lines.append(f"• Rusttijd respecteren: {'✅' if config.respect_quiet_hours else '❌'} ({config.quiet_hours_start}-{config.quiet_hours_end})")
+        lines.append("**Configuration:**")
+        lines.append(f"• Calendar reminders: {'✅' if config.calendar_reminders_enabled else '❌'}")
+        lines.append(f"• Birthday reminders: {'✅' if config.birthday_reminders_enabled else '❌'}")
+        lines.append(f"• Special occasions: {'✅' if config.special_occasions_enabled else '❌'}")
+        lines.append(f"• Email digest: {'✅' if config.email_digest_enabled else '❌'}")
+        lines.append(f"• Respect quiet hours: {'✅' if config.respect_quiet_hours else '❌'} ({config.quiet_hours_start}-{config.quiet_hours_end})")
         lines.append("")
         
-        lines.append(f"**Actieve herinneringen:** {len(pending)}")
+        lines.append(f"**Active reminders:** {len(pending)}")
         
         # Show upcoming reminders (next 3)
         upcoming = sorted([r for r in pending if r.scheduled_time > datetime.now()], 
                          key=lambda x: x.scheduled_time)[:3]
         if upcoming:
-            lines.append("\n**Volgende 3 herinneringen:**")
+            lines.append("\n**Next 3 reminders:**")
             for r in upcoming:
                 time_str = r.scheduled_time.strftime("%Y-%m-%d %H:%M")
                 lines.append(f"• {time_str} - {r.title}")

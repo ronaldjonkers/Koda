@@ -130,53 +130,53 @@ class GoogleWorkspaceClient:
     SETUP_INSTRUCTIONS = """
 ## 🔧 Google Workspace Setup
 
-### Stap 1: Google Cloud Project Maken
-1. Ga naar https://console.cloud.google.com/
-2. Klik "Select a project" → "New Project"
-3. Naam: "Koda" (of iets anders)
-4. Klik "Create"
+### Step 1: Create Google Cloud Project
+1. Go to https://console.cloud.google.com/
+2. Click "Select a project" → "New Project"
+3. Name: "Koda" (or anything else)
+4. Click "Create"
 
-### Stap 2: APIs Inschakelen
-1. Ga naar "APIs & Services" → "Library"
-2. Zoek en enable deze APIs:
+### Step 2: Enable APIs
+1. Go to "APIs & Services" → "Library"
+2. Search and enable these APIs:
    - **Gmail API**
    - **Google Calendar API**
 
-### Stap 3: OAuth Consent Screen
-1. Ga naar "APIs & Services" → "OAuth consent screen"
-2. Kies "External" (of "Internal" voor Workspace)
-3. Vul in:
+### Step 3: OAuth Consent Screen
+1. Go to "APIs & Services" → "OAuth consent screen"
+2. Choose "External" (or "Internal" for Workspace)
+3. Fill in:
    - App name: "Koda"
-   - User support email: jouw email
-   - Developer contact: jouw email
-4. Klik "Save and Continue"
-5. Bij Scopes: klik "Add or Remove Scopes"
-6. Voeg toe:
+   - User support email: your email
+   - Developer contact: your email
+4. Click "Save and Continue"
+5. At Scopes: click "Add or Remove Scopes"
+6. Add:
    - `.../auth/gmail.readonly`
    - `.../auth/gmail.send`
    - `.../auth/gmail.modify`
    - `.../auth/calendar`
-7. Klik "Save and Continue"
-8. Bij Test users: voeg je eigen Gmail adres toe
-9. Klik "Save and Continue"
+7. Click "Save and Continue"
+8. At Test users: add your own Gmail address
+9. Click "Save and Continue"
 
-### Stap 4: OAuth Credentials
-1. Ga naar "APIs & Services" → "Credentials"
-2. Klik "Create Credentials" → "OAuth client ID"
+### Step 4: OAuth Credentials
+1. Go to "APIs & Services" → "Credentials"
+2. Click "Create Credentials" → "OAuth client ID"
 3. Application type: **Desktop app**
 4. Name: "Koda Desktop"
-5. Klik "Create"
-6. Klik "Download JSON"
-7. Hernoem naar `google_credentials.json`
-8. Verplaats naar `~/.koda/google_credentials.json`
+5. Click "Create"
+6. Click "Download JSON"
+7. Rename to `google_credentials.json`
+8. Move to `~/.koda/google_credentials.json`
 
-### Stap 5: Authoriseren
+### Step 5: Authorize
 Run in terminal:
 ```
 koda setup google
 ```
 
-Of via WhatsApp:
+Or via WhatsApp:
 ```
 /setupgoogle
 ```
@@ -186,7 +186,8 @@ Of via WhatsApp:
         self,
         credentials_file: Optional[str] = None,
         token_file: Optional[str] = None,
-        state_file: Optional[str] = None
+        state_file: Optional[str] = None,
+        timezone: str = "Europe/Amsterdam"
     ):
         if not GOOGLE_API_AVAILABLE:
             raise ImportError(
@@ -205,6 +206,7 @@ Of via WhatsApp:
         self._cached_calendars: list[GoogleCalendar] = []
         self._calendars_cache_time: Optional[datetime] = None
         self._cache_ttl = timedelta(minutes=5)  # Cache calendars for 5 minutes
+        self.timezone = timezone
         
         # Load persistent state
         self._state = self._load_state()
@@ -292,8 +294,24 @@ Of via WhatsApp:
                             self._save_state()
                             logger.info("✅ Token refreshed successfully")
                         except Exception as e:
+                            error_str = str(e)
                             logger.error(f"Token refresh failed: {e}")
                             self._state["connection_failures"] = self._state.get("connection_failures", 0) + 1
+                            
+                            # If token is permanently revoked, delete it to stop endless retries
+                            if "invalid_grant" in error_str.lower():
+                                logger.warning("Token permanently revoked. Removing invalid token file to stop retries.")
+                                try:
+                                    self.token_file.rename(self.token_file.with_suffix('.revoked'))
+                                    logger.info(f"Moved invalid token to {self.token_file.with_suffix('.revoked')}")
+                                except Exception:
+                                    try:
+                                        self.token_file.unlink()
+                                    except Exception:
+                                        pass
+                                self._state["token_revoked"] = True
+                                self._state["token_revoked_at"] = datetime.now().isoformat()
+                            
                             self._save_state()
                             creds = None
                             raise AuthorizationRequired(
@@ -380,7 +398,7 @@ Of via WhatsApp:
                 port=port,
                 prompt="consent",
                 access_type="offline",  # Request refresh token
-                success_message="✅ Koda is nu verbonden met Google! Je kunt dit tabblad sluiten."
+                success_message="✅ Koda is now connected to Google! You can close this tab."
             )
             
             self._save_token(creds)
@@ -1002,8 +1020,8 @@ Of via WhatsApp:
             event_body["start"] = {"date": start.strftime("%Y-%m-%d")}
             event_body["end"] = {"date": end.strftime("%Y-%m-%d")}
         else:
-            event_body["start"] = {"dateTime": start.isoformat(), "timeZone": "Europe/Amsterdam"}
-            event_body["end"] = {"dateTime": end.isoformat(), "timeZone": "Europe/Amsterdam"}
+            event_body["start"] = {"dateTime": start.isoformat(), "timeZone": self.timezone}
+            event_body["end"] = {"dateTime": end.isoformat(), "timeZone": self.timezone}
         
         if description:
             event_body["description"] = description
@@ -1069,9 +1087,9 @@ Of via WhatsApp:
             if location:
                 event["location"] = location
             if start:
-                event["start"] = {"dateTime": start.isoformat(), "timeZone": "Europe/Amsterdam"}
+                event["start"] = {"dateTime": start.isoformat(), "timeZone": self.timezone}
             if end:
-                event["end"] = {"dateTime": end.isoformat(), "timeZone": "Europe/Amsterdam"}
+                event["end"] = {"dateTime": end.isoformat(), "timeZone": self.timezone}
             
             # Add Meet link if requested and not present
             if add_meet_link and "conferenceData" not in event:

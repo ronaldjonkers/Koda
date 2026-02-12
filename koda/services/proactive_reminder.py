@@ -105,11 +105,13 @@ class ProactiveReminderService:
         self,
         config: ProactiveReminderConfig,
         send_callback: Callable[[str, str, str], Any],
-        storage_path: Optional[Path] = None
+        storage_path: Optional[Path] = None,
+        timezone: str = "Europe/Amsterdam"
     ):
         self.config = config
         self.send_callback = send_callback
         self.storage_path = storage_path or Path.home() / ".koda" / "proactive_reminders.json"
+        self.timezone = timezone
         
         self._reminders: list[ProactiveReminder] = []
         self._last_check: dict[str, datetime] = {}
@@ -361,7 +363,7 @@ class ProactiveReminderService:
                 reminder = ProactiveReminder(
                     id=f"cal_{event.id}_{int(reminder_time.timestamp())}",
                     type=ReminderType.CALENDAR,
-                    title=f"Afspraak: {event.summary}",
+                    title=f"Appointment: {event.summary}",
                     message=message,
                     scheduled_time=reminder_time,
                     priority=ReminderPriority.HIGH if self._is_important_event(event) else ReminderPriority.NORMAL,
@@ -401,7 +403,7 @@ class ProactiveReminderService:
     def _format_calendar_reminder(self, event) -> str:
         """Format a calendar event reminder message."""
         lines = [
-            f"📅 *Herinnering: Afspraak over {self.config.calendar_default_minutes_before} minuten*",
+            f"📅 *Reminder: Appointment in {self.config.calendar_default_minutes_before} minutes*",
             "",
             f"**{event.summary}**",
         ]
@@ -412,9 +414,6 @@ class ProactiveReminderService:
         
         if hasattr(event, 'location') and event.location:
             lines.append(f"📍 {event.location}")
-        
-        lines.append("")
-        lines.append("_Ik stuur je zo meteen een reminder voor deze afspraak_ ⏰")
         
         return "\n".join(lines)
     
@@ -447,18 +446,18 @@ class ProactiveReminderService:
                     scheduled = datetime.combine(date.today(), send_time).replace(tzinfo=timezone.utc)
                     
                     age = contact.get("age")
-                    age_text = f" ({age} jaar)" if age else ""
+                    age_text = f" ({age})" if age else ""
                     
                     message = (
-                        f"🎂 *Verjaardag herinnering*{age_text}\n\n"
-                        f"**{name}** is jarig over {days_until} dag(en)!\n\n"
-                        f"Vergeet niet om te feliciteren. 🎉"
+                        f"🎂 *Birthday reminder*{age_text}\n\n"
+                        f"**{name}** has a birthday in {days_until} day(s)!\n\n"
+                        f"Don't forget to congratulate them. 🎉"
                     )
                     
                     reminder = ProactiveReminder(
                         id=f"bday_{name}_{date.today().year}",
                         type=ReminderType.BIRTHDAY,
-                        title=f"Verjaardag: {name}",
+                        title=f"Birthday: {name}",
                         message=message,
                         scheduled_time=scheduled,
                         priority=ReminderPriority.NORMAL,
@@ -474,14 +473,24 @@ class ProactiveReminderService:
         except Exception as e:
             logger.error(f"Error scanning birthdays: {e}")
     
+    def _get_local_tz(self):
+        """Get the configured timezone as a ZoneInfo object."""
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(self.timezone)
+        except Exception:
+            return timezone.utc
+    
     async def _schedule_morning_briefing(self) -> None:
         """Schedule the daily morning briefing."""
         try:
+            local_tz = self._get_local_tz()
             send_time = datetime.strptime(self.config.calendar_morning_check_time, "%H:%M").time()
-            scheduled = datetime.combine(date.today(), send_time).replace(tzinfo=timezone.utc)
+            scheduled = datetime.combine(date.today(), send_time).replace(tzinfo=local_tz)
             
             # If already passed today, schedule for tomorrow
-            if scheduled < datetime.now(timezone.utc):
+            now_local = datetime.now(local_tz)
+            if scheduled < now_local:
                 scheduled += timedelta(days=1)
             
             # Check if already scheduled
@@ -494,7 +503,7 @@ class ProactiveReminderService:
             reminder = ProactiveReminder(
                 id=f"morning_{scheduled.strftime('%Y%m%d')}",
                 type=ReminderType.MORNING_BRIEFING,
-                title="Goedemorgen!",
+                title="Good morning!",
                 message="",  # Will be filled at send time
                 scheduled_time=scheduled,
                 priority=ReminderPriority.NORMAL,
@@ -517,24 +526,24 @@ class ProactiveReminderService:
     
     async def generate_morning_briefing(self) -> str:
         """Generate the morning briefing message with current data."""
-        lines = ["🌅 *Goedemorgen!*", ""]
+        lines = ["🌅 *Good morning!*", ""]
         
         # Today's events
         try:
             from koda.integrations.google_workspace import GoogleWorkspaceClient
-            client = GoogleWorkspaceClient()
+            client = GoogleWorkspaceClient(timezone=self.timezone)
             if client.is_authorized:
                 events = client.get_today_events()
                 if events:
-                    lines.append(f"📅 *Vandaag heb je {len(events)} afspraak(len):*")
+                    lines.append(f"📅 *You have {len(events)} appointment(s) today:*")
                     for event in events[:5]:  # Show max 5
                         time_str = event.start.strftime("%H:%M") if hasattr(event.start, 'strftime') else ""
                         lines.append(f"  • {time_str} - {event.summary}")
                     if len(events) > 5:
-                        lines.append(f"  ... en nog {len(events) - 5} meer")
+                        lines.append(f"  ... and {len(events) - 5} more")
                     lines.append("")
                 else:
-                    lines.append("📅 *Vandaag geen afspraken in je agenda.*")
+                    lines.append("📅 *No appointments on your calendar today.*")
                     lines.append("")
         except Exception as e:
             logger.debug(f"Could not get today's events: {e}")
@@ -545,7 +554,7 @@ class ProactiveReminderService:
             client = ICloudContactsClient(use_local=True)
             birthdays = client.get_birthdays_on_date()
             if birthdays:
-                lines.append("🎂 *Verjaardagen vandaag:*")
+                lines.append("🎂 *Birthdays today:*")
                 for b in birthdays:
                     age = b.get("age")
                     age_str = f" ({age})" if age else ""
@@ -554,7 +563,7 @@ class ProactiveReminderService:
         except Exception as e:
             logger.debug(f"Could not get birthdays: {e}")
         
-        lines.append("Fijne dag gewenst! ☀️")
+        lines.append("Have a great day! ☀️")
         
         return "\n".join(lines)
     

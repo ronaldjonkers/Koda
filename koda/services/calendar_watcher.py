@@ -204,14 +204,14 @@ class CalendarWatcherService:
         time_str = event.start.strftime("%H:%M")
         
         if minutes_before >= 60:
-            time_until = f"{minutes_before // 60} uur"
+            time_until = f"{minutes_before // 60} hour(s)"
         else:
-            time_until = f"{minutes_before} minuten"
+            time_until = f"{minutes_before} minutes"
         
-        message = f"""⏰ *Agenda Herinnering*
+        message = f"""⏰ *Calendar Reminder*
 
 📅 *{event.summary}*
-🕐 Begint over {time_until} (om {time_str})"""
+🕐 Starts in {time_until} (at {time_str})"""
         
         if event.location:
             message += f"\n📍 {event.location}"
@@ -229,30 +229,30 @@ class CalendarWatcherService:
         today = datetime.now().strftime("%A %d %B")
         
         if not events:
-            return f"""☀️ *Goedemorgen!*
+            return f"""☀️ *Good morning!*
 
 📅 *{today}*
 
-Je hebt vandaag geen afspraken gepland. Vrije dag! 🎉"""
+No appointments scheduled today. Free day! 🎉"""
         
-        message = f"""☀️ *Goedemorgen!*
+        message = f"""☀️ *Good morning!*
 
 📅 *{today}*
-Je hebt {len(events)} afspraak{"en" if len(events) > 1 else ""} vandaag:
+You have {len(events)} appointment{"s" if len(events) > 1 else ""} today:
 
 """
         
         for event in sorted(events, key=lambda e: e.start):
             time_str = event.start.strftime("%H:%M")
             if event.all_day:
-                message += f"• 📌 *{event.summary}* (hele dag)\n"
+                message += f"• 📌 *{event.summary}* (all day)\n"
             else:
                 message += f"• *{time_str}* - {event.summary}"
                 if event.location:
                     message += f" 📍 _{event.location}_"
                 message += "\n"
         
-        message += "\n_Ik stuur je een herinnering voor elke afspraak._"
+        message += "\n_I'll send you a reminder for each appointment._"
         return message
     
     def _check_and_send_reminders(self) -> None:

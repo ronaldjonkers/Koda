@@ -201,15 +201,15 @@ class ActiveHoursManager:
         else:
             self.dnd.until = None
         
-        until_str = f" tot {self.dnd.until.strftime('%H:%M')}" if self.dnd.until else ""
-        return f"🔕 Niet storen ingeschakeld{until_str}. {'Belangrijke berichten komen nog door.' if allow_important else ''}"
+        until_str = f" until {self.dnd.until.strftime('%H:%M')}" if self.dnd.until else ""
+        return f"🔕 Do Not Disturb enabled{until_str}. {'Important messages will still come through.' if allow_important else ''}"
     
     def disable_dnd(self) -> str:
         """Disable Do Not Disturb mode."""
         self.dnd.enabled = False
         self.dnd.until = None
         self.dnd.reason = ""
-        return "🔔 Niet storen uitgeschakeld."
+        return "🔔 Do Not Disturb disabled."
     
     def set_active_hours(
         self,
@@ -238,48 +238,48 @@ class ActiveHoursManager:
         if days is not None:
             self.active_hours.active_days = days
         
-        day_names = ["ma", "di", "wo", "do", "vr", "za", "zo"]
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         days_str = ", ".join(day_names[d] for d in self.active_hours.active_days)
         
-        return f"⏰ Actieve uren ingesteld: {start} - {end} ({days_str})"
+        return f"⏰ Active hours set: {start} - {end} ({days_str})"
     
     def add_vip(self, sender: str) -> str:
         """Add sender to VIP list (always respond)."""
         if sender not in self.active_hours.always_respond_to:
             self.active_hours.always_respond_to.append(sender)
-        return f"✅ {sender} toegevoegd aan VIP-lijst"
+        return f"✅ {sender} added to VIP list"
     
     def remove_vip(self, sender: str) -> str:
         """Remove sender from VIP list."""
         if sender in self.active_hours.always_respond_to:
             self.active_hours.always_respond_to.remove(sender)
-        return f"✅ {sender} verwijderd van VIP-lijst"
+        return f"✅ {sender} removed from VIP list"
     
     def get_status(self) -> str:
         """Get current status as a formatted string."""
         now = self._get_local_now()
         
-        lines = ["📊 *Status Actieve Uren*\n"]
+        lines = ["📊 *Active Hours Status*\n"]
         
         # Active hours
         if self.active_hours.enabled:
-            status = "✅ Actief" if self.is_active_time() else "😴 Buiten actieve uren"
-            lines.append(f"*Actieve uren:* {self.active_hours.start_time} - {self.active_hours.end_time}")
+            status = "✅ Active" if self.is_active_time() else "😴 Outside active hours"
+            lines.append(f"*Active hours:* {self.active_hours.start_time} - {self.active_hours.end_time}")
             lines.append(f"*Status:* {status}")
         else:
-            lines.append("*Actieve uren:* Uitgeschakeld (altijd actief)")
+            lines.append("*Active hours:* Disabled (always active)")
         
         # DND
         if self.is_dnd_active():
-            until_str = f" (tot {self.dnd.until.strftime('%H:%M')})" if self.dnd.until else ""
+            until_str = f" (until {self.dnd.until.strftime('%H:%M')})" if self.dnd.until else ""
             reason_str = f" - {self.dnd.reason}" if self.dnd.reason else ""
-            lines.append(f"\n🔕 *Niet storen:* Actief{until_str}{reason_str}")
+            lines.append(f"\n🔕 *Do Not Disturb:* Active{until_str}{reason_str}")
         
         # VIP list
         if self.active_hours.always_respond_to:
-            lines.append(f"\n*VIP's:* {len(self.active_hours.always_respond_to)} contacten")
+            lines.append(f"\n*VIPs:* {len(self.active_hours.always_respond_to)} contacts")
         
-        lines.append(f"\n_Huidige tijd: {now.strftime('%H:%M')} ({self.active_hours.timezone})_")
+        lines.append(f"\n_Current time: {now.strftime('%H:%M')} ({self.active_hours.timezone})_")
         
         return "\n".join(lines)
     

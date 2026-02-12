@@ -11,6 +11,7 @@ class AssistantConfig(BaseModel):
     user_name: str = ""  # How to address the user
     language: str = "en"  # Preferred language (en, nl, de, etc.)
     personality: str = "professional"  # professional, friendly, formal
+    timezone: str = "Europe/Amsterdam"  # IANA timezone (e.g., Europe/Amsterdam, America/New_York)
 
 
 class WhatsAppContactRule(BaseModel):
@@ -19,7 +20,7 @@ class WhatsAppContactRule(BaseModel):
     name: str = ""  # Contact name for reference
     instructions: str = ""  # Custom instructions for this contact
     auto_reply: bool = True  # Whether to auto-reply to this contact
-    escalate_keywords: list[str] = Field(default_factory=lambda: ["afspraak", "appointment", "meeting", "urgent", "dringend"])
+    escalate_keywords: list[str] = Field(default_factory=lambda: ["appointment", "meeting", "urgent", "dringend", "afspraak"])
 
 
 class WhatsAppConfig(BaseModel):
@@ -42,14 +43,14 @@ class WhatsAppConfig(BaseModel):
     contact_rules: list[WhatsAppContactRule] = Field(default_factory=list)
     
     # Default behavior for unknown contacts (when bot_mode=True)
-    default_greeting: str = "Hallo! Ik ben {assistant_name}, de AI-assistent van {owner_name}. Hoe kan ik je helpen?"
+    default_greeting: str = "Hello! I'm {assistant_name}, the AI assistant of {owner_name}. How can I help you?"
     default_instructions: str = "Be helpful and professional. If someone wants to schedule an appointment or needs something urgent that requires the owner, escalate to the owner."
     
     # Escalation settings
     escalate_to_owner: bool = True  # Notify owner for important requests
     escalation_keywords: list[str] = Field(default_factory=lambda: [
-        "afspraak", "appointment", "meeting", "urgent", "dringend", 
-        "bellen", "call", "terugbellen", "callback"
+        "appointment", "meeting", "urgent", "call", "callback",
+        "afspraak", "dringend", "bellen", "terugbellen"
     ])
 
 
@@ -282,7 +283,7 @@ class WhatsAppAutoReplyConfig(BaseModel):
     """WhatsApp auto-reply configuration for specific contacts."""
     enabled: bool = False
     contacts: list[str] = Field(default_factory=list)  # Phone numbers to auto-reply
-    greeting: str = "Hallo! Ik ben de AI-assistent van {owner}. Hoe kan ik je helpen?"
+    greeting: str = "Hello! I'm the AI assistant of {owner}. How can I help you?"
     owner_name: str = ""
 
 
@@ -291,7 +292,7 @@ class BirthdayConfig(BaseModel):
     enabled: bool = False
     reminder_days_before: int = 1
     send_via: str = "whatsapp"  # whatsapp, telegram, or email
-    default_message_template: str = "Gefeliciteerd met je verjaardag, {name}! 🎂🎉"
+    default_message_template: str = "Happy birthday, {name}! 🎂🎉"
 
 
 class EmailConfig(BaseModel):

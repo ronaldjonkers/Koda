@@ -18,11 +18,13 @@ class GoogleCalendarClient:
         self,
         credentials_file: str = "~/.koda/google_credentials.json",
         token_file: str = "~/.koda/google_token.json",
-        calendar_ids: Optional[list[str]] = None
+        calendar_ids: Optional[list[str]] = None,
+        timezone: str = "Europe/Amsterdam"
     ):
         self.credentials_file = Path(credentials_file).expanduser()
         self.token_file = Path(token_file).expanduser()
         self.calendar_ids = calendar_ids or ["primary"]
+        self.timezone = timezone
         self._service = None
     
     def _get_service(self):
@@ -148,8 +150,8 @@ class GoogleCalendarClient:
         
         event = {
             "summary": summary,
-            "start": {"dateTime": start.isoformat(), "timeZone": "Europe/Amsterdam"},
-            "end": {"dateTime": end.isoformat(), "timeZone": "Europe/Amsterdam"},
+            "start": {"dateTime": start.isoformat(), "timeZone": self.timezone},
+            "end": {"dateTime": end.isoformat(), "timeZone": self.timezone},
         }
         
         if description:

@@ -107,7 +107,11 @@ The user's name is **{self.user_name}**. Address them by name when appropriate."
     
     def _build_time_section(self) -> str:
         """Current time section."""
-        now = datetime.now()
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(self.timezone))
+        except Exception:
+            now = datetime.now()
         return f"""## Current Date & Time
 - Date: {now.strftime("%A, %B %d, %Y")}
 - Time: {now.strftime("%H:%M")}
