@@ -919,8 +919,8 @@ Or via WhatsApp:
         is_all_day = "date" in start_data
         
         if is_all_day:
-            start = datetime.fromisoformat(start_data["date"])
-            end = datetime.fromisoformat(end_data["date"])
+            start = datetime.fromisoformat(start_data["date"]).replace(tzinfo=timezone.utc)
+            end = datetime.fromisoformat(end_data["date"]).replace(tzinfo=timezone.utc)
         else:
             start = datetime.fromisoformat(start_data.get("dateTime", "").replace("Z", "+00:00"))
             end = datetime.fromisoformat(end_data.get("dateTime", "").replace("Z", "+00:00"))
