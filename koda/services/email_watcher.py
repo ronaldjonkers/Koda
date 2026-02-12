@@ -407,14 +407,14 @@ class EmailWatcherService:
         
         # Build message
         emoji = "🔴" if notification.is_important else "📧"
-        message = f"""{emoji} *Nieuwe email - {notification.account_name}*
+        message = f"""{emoji} *New email - {notification.account_name}*
 
-*Van:* {notification.sender}
-*Onderwerp:* {notification.subject}
+*From:* {notification.sender}
+*Subject:* {notification.subject}
 
 _{notification.preview}_
 
-_Wil je dat ik deze email samenvat of beantwoord?_"""
+_Would you like me to summarize or reply to this email?_"""
         
         # Send notification
         if self.owner_phone:

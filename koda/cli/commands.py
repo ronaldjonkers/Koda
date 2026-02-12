@@ -1304,6 +1304,18 @@ def gateway(
     except Exception as e:
         logger.debug(f"Email watcher not started: {e}")
     
+    # Start calendar sync service (local cache of all calendar events)
+    calendar_sync = None
+    try:
+        from koda.services.calendar_sync import create_calendar_sync_from_config
+        
+        calendar_sync = create_calendar_sync_from_config(config)
+        if calendar_sync:
+            calendar_sync.start()
+            console.print(f"[green]✓[/green] Calendar sync: {len(calendar_sync._calendar_accounts)} account(s), every {calendar_sync.sync_interval}s")
+    except Exception as e:
+        logger.debug(f"Calendar sync not started: {e}")
+    
     # Start calendar watcher for proactive event reminders
     calendar_watcher = None
     try:
@@ -1394,6 +1406,8 @@ def gateway(
             stop_config_watcher()
             if email_watcher:
                 email_watcher.stop()
+            if calendar_sync:
+                calendar_sync.stop()
             if calendar_watcher:
                 calendar_watcher.stop()
             if proactive_service:

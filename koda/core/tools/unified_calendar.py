@@ -375,28 +375,28 @@ Parameters for 'conflicts':
             logger.error(f"Calendar connection error:")
             logger.error(f"Full error: {e}")
             logger.error(f"Traceback:\n{traceback.format_exc()}")
-            return f"""❌ **Kan geen verbinding maken met calendar server**
+            return f"""❌ **Cannot connect to calendar server**
 
-Mogelijke oorzaken:
-• Onjuiste inloggegevens (email/wachtwoord)
-• Google Workspace token verlopen - probeer '/resetgoogle' of 'koda setup-google'
-• Server is niet bereikbaar
-• Autodiscover werkt niet voor dit account
+Possible causes:
+• Incorrect credentials (email/password)
+• Google Workspace token expired - try '/resetgoogle' or 'koda setup-google'
+• Server is unreachable
+• Autodiscover does not work for this account
 
-Probeer:
-1. Controleer of je wachtwoord correct is
-2. Gebruik /removecalendar en /addcalendar om opnieuw in te stellen
-3. Voor Google: reset de connectie met 'koda setup-google --reset'
-4. Probeer handmatig een server op te geven
+Try:
+1. Check if your password is correct
+2. Use /removecalendar and /addcalendar to reconfigure
+3. For Google: reset the connection with 'koda setup-google --reset'
+4. Try specifying a server manually
 
-_Technische fout is gelogd op de server._"""
+_Technical error has been logged on the server._"""
         
         except Exception as e:
             import traceback
             logger.error(f"Calendar operation failed for action '{action}':")
             logger.error(f"Full error: {e}")
             logger.error(f"Traceback:\n{traceback.format_exc()}")
-            return f"❌ **Calendar fout:** {str(e)}\n\n_Details zijn gelogd op de server._"
+            return f"❌ **Calendar error:** {str(e)}\n\n_Details have been logged on the server._"
     
     async def _list_calendars(self) -> str:
         """List all available calendar accounts with their names."""
@@ -405,9 +405,9 @@ _Technische fout is gelogd op de server._"""
             self._add_google_workspace_calendars()
         
         if not self.calendar_accounts:
-            return "Geen kalenders geconfigureerd. Gebruik 'koda config calendar' om een account toe te voegen."
+            return "No calendars configured. Use 'koda config calendar' or /addcalendar to add an account."
         
-        output = ["**Beschikbare Kalenders:**\n"]
+        output = ["**Available Calendars:**\n"]
         
         for account in self.calendar_accounts:
             name = account.get("name", "Unnamed")
@@ -434,9 +434,9 @@ _Technische fout is gelogd op de server._"""
                     client = self._get_client_for_account(account)
                     if client and hasattr(client, 'list_calendars'):
                         calendars = client.list_calendars()
-                        output.append(f"  Toegang tot {len(calendars)} kalender(s)")
+                        output.append(f"  Access to {len(calendars)} calendar(s)")
                 except Exception as e:
-                    output.append(f"  ⚠️ Fout: {e}")
+                    output.append(f"  ⚠️ Error: {e}")
             elif account_type == "exchange":
                 output.append(f"  📧 {account.get('email', '')}")
             elif account_type == "caldav":
@@ -444,7 +444,7 @@ _Technische fout is gelogd op de server._"""
             
             output.append("")
         
-        output.append("_Gebruik de kalender NAAM bij het maken van afspraken._")
+        output.append("_Use the calendar NAME when creating events._")
         return "\n".join(output)
     
     async def _list_events(self, days: int = 7, today_only: bool = False, week_view: bool = False) -> str:
@@ -452,11 +452,11 @@ _Technische fout is gelogd op de server._"""
         all_events = []
         
         if today_only:
-            title = "📅 Agenda voor vandaag"
+            title = "📅 Today's agenda"
         elif week_view:
-            title = "📅 Agenda deze week"
+            title = "📅 This week's agenda"
         else:
-            title = f"📅 Agenda komende {days} dagen"
+            title = f"📅 Agenda for the next {days} days"
         
         logger.debug(f"Fetching events from {len(self.calendar_accounts)} calendar accounts")
         
@@ -516,7 +516,7 @@ _Technische fout is gelogd op de server._"""
                         )
                     for e in events:
                         e["_account"] = account_name
-                        e["summary"] = e.get("subject", e.get("summary", "(Geen titel)"))
+                        e["summary"] = e.get("subject", e.get("summary", "(No title)"))
                         all_events.append(e)
                 
                 elif account_type == "caldav":
@@ -537,7 +537,7 @@ _Technische fout is gelogd op de server._"""
                 logger.debug(f"Calendar error traceback:\n{traceback.format_exc()}")
         
         if not all_events:
-            return f"{title}: Geen afspraken gevonden."
+            return f"{title}: No events found."
         
         # Sort by start time
         def get_start(e):
@@ -552,7 +552,7 @@ _Technische fout is gelogd op de server._"""
         all_events.sort(key=get_start)
         
         # Group by day for better readability
-        output = [f"**{title}** ({len(all_events)} afspraken):\n"]
+        output = [f"**{title}** ({len(all_events)} events):\n"]
         
         current_day = None
         for e in all_events:
@@ -578,7 +578,7 @@ _Technische fout is gelogd op de server._"""
             is_shared = e.get("_is_shared", False)
             shared_label = " [shared]" if is_shared else ""
             
-            output.append(f"  • **{e.get('summary', '(Geen titel)')}** [{account}]{shared_label}")
+            output.append(f"  • **{e.get('summary', '(No title)')}** [{account}]{shared_label}")
             output.append(f"    🕐 {start_display}")
             
             if e.get("location"):
@@ -586,7 +586,7 @@ _Technische fout is gelogd op de server._"""
             if e.get("meet_link"):
                 output.append(f"    🔗 {e['meet_link']}")
             if e.get("is_recurring"):
-                output.append(f"    🔄 Terugkerend")
+                output.append(f"    🔄 Recurring")
         
         return "\n".join(output)
     
@@ -626,12 +626,12 @@ _Technische fout is gelogd op de server._"""
                 logger.debug(f"Error fetching from {account_name}: {e}")
         
         if not all_events:
-            return f"Geen afspraken in de komende {hours} uur."
+            return f"No events in the next {hours} hours."
         
         # Sort by start time
         all_events.sort(key=lambda e: e.get("start", datetime.max))
         
-        output = [f"**Komende {hours} uur** ({len(all_events)} afspraken):\n"]
+        output = [f"**Next {hours} hours** ({len(all_events)} events):\n"]
         
         for e in all_events:
             start = e.get("start")
@@ -657,7 +657,7 @@ _Technische fout is gelogd op de server._"""
         calendar_name = kwargs.get("calendar")
         
         if not start_str or not end_str:
-            return "Error: start en end tijden zijn vereist voor conflict check."
+            return "Error: start and end times are required for conflict check."
         
         try:
             start = datetime.fromisoformat(start_str)
@@ -674,7 +674,7 @@ _Technische fout is gelogd op de server._"""
             if account:
                 accounts_to_check = [account]
             else:
-                return f"Kalender '{calendar_name}' niet gevonden."
+                return f"Calendar '{calendar_name}' not found."
         else:
             accounts_to_check = self.calendar_accounts
         
@@ -708,14 +708,14 @@ _Technische fout is gelogd op de server._"""
                 logger.debug(f"Error checking {account_name}: {e}")
         
         if conflicts:
-            output = [f"**⚠️ {len(conflicts)} conflict(en) gevonden:**\n"]
+            output = [f"**⚠️ {len(conflicts)} conflict(s) found:**\n"]
             for c in conflicts:
                 output.append(f"• **{c['summary']}** [{c['account']}]")
                 if isinstance(c['start'], datetime):
                     output.append(f"  🕐 {c['start'].strftime('%H:%M')} - {c['end'].strftime('%H:%M')}")
             return "\n".join(output)
         else:
-            return f"✅ Geen conflicten gevonden voor dit tijdslot."
+            return f"✅ No conflicts found for this time slot."
     
     async def _create_event(self, **kwargs) -> str:
         """Create a calendar event with optional Meet link and WhatsApp reminder."""
@@ -743,6 +743,11 @@ _Technische fout is gelogd op de server._"""
         except ValueError as e:
             return f"Error parsing datetime: {e}"
         
+        # Check available calendars
+        account_names = self._get_account_names()
+        if not account_names:
+            return "Error: No calendar accounts configured. Use /addcalendar to add one."
+        
         # Check for conflicts if requested
         if check_conflicts:
             conflict_result = await self._check_conflicts(
@@ -750,13 +755,8 @@ _Technische fout is gelogd op de server._"""
                 end=end_str,
                 calendar=calendar_name
             )
-            if "conflict" in conflict_result.lower():
-                return f"{conflict_result}\n\nWil je toch doorgaan met het inplannen? Gebruik dan check_conflicts: false"
-        
-        # Check available calendars
-        account_names = self._get_account_names()
-        if not account_names:
-            return "Error: No calendar accounts configured. Run 'koda config calendar' to add one."
+            if "conflict(s) found" in conflict_result.lower():
+                return f"{conflict_result}\n\nWant to proceed anyway? Use check_conflicts: false"
         
         # Determine which calendar to use
         if not calendar_name:
@@ -765,18 +765,18 @@ _Technische fout is gelogd op de server._"""
             else:
                 names_list = ", ".join(f'"{n}"' for n in account_names)
                 return (
-                    f"**Welke kalender wil je gebruiken?**\n\n"
-                    f"Beschikbaar: {names_list}\n\n"
-                    f"Geef op met: `calendar: \"Werk\"` (of de naam van je kalender)\n\n"
-                    f"Wil je ook:\n"
-                    f"- Een **Google Meet link** toevoegen?\n"
-                    f"- Een **WhatsApp herinnering** voor de afspraak? (bijv. 15 minuten van tevoren)"
+                    f"**Which calendar do you want to use?**\n\n"
+                    f"Available: {names_list}\n\n"
+                    f"Specify with: `calendar: \"Work\"` (or your calendar name)\n\n"
+                    f"Would you also like:\n"
+                    f"- A **Google Meet link** added?\n"
+                    f"- A **WhatsApp reminder** before the event? (e.g. 15 minutes before)"
                 )
         
         # Find the account by name
         account = self._get_account_by_name(calendar_name)
         if not account:
-            return f"Error: Kalender '{calendar_name}' niet gevonden. Beschikbaar: {', '.join(account_names)}"
+            return f"Error: Calendar '{calendar_name}' not found. Available: {', '.join(account_names)}"
         
         account_type = account.get("type", "")
         
@@ -860,8 +860,8 @@ _Technische fout is gelogd op de server._"""
             
             if reminder_time > datetime.now():
                 reminder_message = (
-                    f"📅 *Herinnering*\n\n"
-                    f"Je hebt over {whatsapp_reminder} minuten een afspraak:\n\n"
+                    f"📅 *Reminder*\n\n"
+                    f"You have an appointment in {whatsapp_reminder} minutes:\n\n"
                     f"**{summary}**\n"
                     f"🕐 {start.strftime('%H:%M')}"
                 )
@@ -885,9 +885,9 @@ _Technische fout is gelogd op de server._"""
                     logger.error(f"Failed to schedule WhatsApp reminder: {e}")
         
         # Build response
-        output = [f"✅ **Afspraak aangemaakt:** {summary}"]
+        output = [f"✅ **Event created:** {summary}"]
         output.append(f"📅 {start.strftime('%Y-%m-%d %H:%M')} - {end.strftime('%H:%M')}")
-        output.append(f"📆 Kalender: {calendar_name}")
+        output.append(f"📆 Calendar: {calendar_name}")
         
         if kwargs.get("location"):
             output.append(f"📍 {kwargs['location']}")
@@ -899,7 +899,7 @@ _Technische fout is gelogd op de server._"""
             output.append(f"\n🔗 Event link: {result['htmlLink']}")
         
         if reminder_scheduled:
-            output.append(f"\n⏰ WhatsApp herinnering ingesteld voor {whatsapp_reminder} minuten van tevoren")
+            output.append(f"\n⏰ WhatsApp reminder set for {whatsapp_reminder} minutes before")
         
         return "\n".join(output)
     
@@ -959,7 +959,7 @@ _Technische fout is gelogd op de server._"""
                 )
                 if result:
                     meet_info = f"\n🔗 Meet: {result.meet_link}" if result.meet_link else ""
-                    return f"✅ **Afspraak bijgewerkt:** {result.summary}{meet_info}"
+                    return f"✅ **Event updated:** {result.summary}{meet_info}"
                 return "❌ Failed to update event"
             
             elif account_type == "exchange":
@@ -972,7 +972,7 @@ _Technische fout is gelogd op de server._"""
                     location=kwargs.get("location")
                 )
                 if result:
-                    return f"✅ **Afspraak bijgewerkt**"
+                    return f"✅ **Event updated**"
                 return "❌ Failed to update event"
             
             elif account_type == "caldav":
@@ -985,7 +985,7 @@ _Technische fout is gelogd op de server._"""
                     location=kwargs.get("location")
                 )
                 if result:
-                    return f"✅ **Afspraak bijgewerkt**"
+                    return f"✅ **Event updated**"
                 return "❌ Failed to update event"
             
             else:
@@ -1028,19 +1028,19 @@ _Technische fout is gelogd op de server._"""
                 calendar_id = account.get("calendar_id", "primary")
                 result = client.delete_event(event_id=event_id, calendar_id=calendar_id)
                 if result:
-                    return "✅ **Afspraak verwijderd**"
+                    return "✅ **Event deleted**"
                 return "❌ Failed to delete event"
             
             elif account_type == "exchange":
                 result = client.delete_calendar_event(event_id=event_id)
                 if result:
-                    return "✅ **Afspraak verwijderd**"
+                    return "✅ **Event deleted**"
                 return "❌ Failed to delete event"
             
             elif account_type == "caldav":
                 result = client.delete_event(event_uid=event_id)
                 if result:
-                    return "✅ **Afspraak verwijderd**"
+                    return "✅ **Event deleted**"
                 return "❌ Failed to delete event"
             
             else:

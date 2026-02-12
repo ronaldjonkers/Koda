@@ -161,6 +161,12 @@ class Account(BaseModel):
     use_ssl: bool = True
     folder: str = "INBOX"
     
+    # SMTP-specific (for sending emails from IMAP accounts)
+    smtp_host: str = ""  # SMTP server, e.g., smtp.gmail.com
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    
     # CalDAV-specific
     url: str = ""  # CalDAV URL
     calendar_path: str = ""

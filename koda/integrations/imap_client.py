@@ -352,3 +352,129 @@ class IMAPClient:
         except Exception as e:
             logger.error(f"Failed to mark as read: {e}")
             return False
+    
+    # =========================================================================
+    # SMTP Sending
+    # =========================================================================
+    
+    def send_email(
+        self,
+        to: str | list[str],
+        subject: str,
+        body: str,
+        cc: str | list[str] | None = None,
+        smtp_host: str = "",
+        smtp_port: int = 587,
+        smtp_use_tls: bool = True,
+        smtp_use_ssl: bool = False,
+    ) -> dict:
+        """Send an email via SMTP.
+        
+        Uses the same credentials as the IMAP connection.
+        SMTP host is inferred from IMAP host if not provided.
+        
+        Args:
+            to: Recipient(s)
+            subject: Email subject
+            body: Email body (plain text)
+            cc: CC recipient(s)
+            smtp_host: SMTP server (auto-inferred if empty)
+            smtp_port: SMTP port
+            smtp_use_tls: Use STARTTLS
+            smtp_use_ssl: Use SSL
+        
+        Returns:
+            Dict with send result
+        """
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        # Infer SMTP host from IMAP host if not provided
+        if not smtp_host:
+            smtp_host = self._infer_smtp_host(self.host)
+        
+        if not smtp_host:
+            raise ValueError(f"Cannot determine SMTP server for {self.host}. Configure smtp_host explicitly.")
+        
+        # Normalize recipients
+        if isinstance(to, str):
+            to_list = [addr.strip() for addr in to.split(",")]
+        else:
+            to_list = list(to)
+        
+        cc_list = []
+        if cc:
+            if isinstance(cc, str):
+                cc_list = [addr.strip() for addr in cc.split(",")]
+            else:
+                cc_list = list(cc)
+        
+        # Build message
+        msg = MIMEMultipart("alternative")
+        msg["From"] = self.username
+        msg["To"] = ", ".join(to_list)
+        msg["Subject"] = subject
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
+        
+        msg.attach(MIMEText(body, "plain"))
+        
+        # Send
+        all_recipients = to_list + cc_list
+        
+        try:
+            if smtp_use_ssl:
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port)
+            else:
+                server = smtplib.SMTP(smtp_host, smtp_port)
+                if smtp_use_tls:
+                    server.starttls()
+            
+            server.login(self.username, self.password)
+            server.sendmail(self.username, all_recipients, msg.as_string())
+            server.quit()
+            
+            logger.info(f"Email sent via {smtp_host} to {to_list}: {subject}")
+            return {
+                "to": to_list,
+                "cc": cc_list,
+                "subject": subject,
+                "status": "sent",
+                "from": self.username,
+            }
+        except Exception as e:
+            logger.error(f"SMTP send failed via {smtp_host}: {e}")
+            raise
+    
+    @staticmethod
+    def _infer_smtp_host(imap_host: str) -> str:
+        """Infer SMTP host from IMAP host.
+        
+        Common mappings:
+        - imap.gmail.com -> smtp.gmail.com
+        - imap.mail.me.com -> smtp.mail.me.com
+        - outlook.office365.com -> smtp.office365.com
+        - imap.domain.com -> smtp.domain.com
+        """
+        if not imap_host:
+            return ""
+        
+        known = {
+            "imap.gmail.com": "smtp.gmail.com",
+            "imap.mail.me.com": "smtp.mail.me.com",
+            "imap.mail.yahoo.com": "smtp.mail.yahoo.com",
+            "outlook.office365.com": "smtp.office365.com",
+            "imap.fastmail.com": "smtp.fastmail.com",
+            "mail.protonmail.ch": "smtp.protonmail.ch",
+            "imap.zoho.com": "smtp.zoho.com",
+        }
+        
+        if imap_host in known:
+            return known[imap_host]
+        
+        # Generic: replace "imap." with "smtp."
+        if imap_host.startswith("imap."):
+            return "smtp." + imap_host[5:]
+        
+        return ""

@@ -238,13 +238,19 @@ Examples:
                 raise ValueError("Google Workspace not connected. Use dashboard to authenticate.")
         elif acc_type == "imap":
             from koda.integrations.imap_client import IMAPClient
-            self._clients[account_name] = IMAPClient(
+            client = IMAPClient(
                 host=account.get("host", ""),
                 port=account.get("port", 993),
                 username=account.get("email", ""),
                 password=account.get("password", ""),
                 use_ssl=account.get("use_ssl", True)
             )
+            # Store SMTP config on the client so send_email can use it
+            client._smtp_host = account.get("smtp_host", "")
+            client._smtp_port = account.get("smtp_port", 587)
+            client._smtp_use_tls = account.get("smtp_use_tls", True)
+            client._smtp_use_ssl = account.get("smtp_use_ssl", False)
+            self._clients[account_name] = client
         elif acc_type == "exchange":
             from koda.integrations.exchange_client import ExchangeClient
             self._clients[account_name] = ExchangeClient(
@@ -323,21 +329,21 @@ Examples:
             logger.error(f"Email connection error for account '{account_name}':")
             logger.error(f"Full error: {e}")
             logger.error(f"Traceback:\n{traceback.format_exc()}")
-            return f"""❌ **Kan geen verbinding maken met email server**
+            return f"""❌ **Cannot connect to email server**
 
 Account: {account_name}
 
-Mogelijke oorzaken:
-• Onjuiste inloggegevens (email/wachtwoord)
-• Server is niet bereikbaar
-• Autodiscover werkt niet voor dit account
+Possible causes:
+• Incorrect credentials (email/password)
+• Server is unreachable
+• Autodiscover does not work for this account
 
-Probeer:
-1. Controleer of je wachtwoord correct is
-2. Gebruik /removemail {account_name} en /addmail om opnieuw in te stellen
-3. Probeer handmatig een server op te geven (niet autodiscover)
+Try:
+1. Check if your password is correct
+2. Use /removemail {account_name} and /addmail to reconfigure
+3. Try specifying a server manually (no autodiscover)
 
-_Technische fout is gelogd op de server._"""
+_Technical error has been logged on the server._"""
         
         except Exception as e:
             # Other errors - log full details on server
@@ -345,7 +351,7 @@ _Technische fout is gelogd op de server._"""
             logger.error(f"Email tool error for action '{action}':")
             logger.error(f"Full error: {e}")
             logger.error(f"Traceback:\n{traceback.format_exc()}")
-            return f"❌ **Email fout:** {str(e)}\n\n_Details zijn gelogd op de server._"
+            return f"❌ **Email error:** {str(e)}\n\n_Details have been logged on the server._"
     
     def _list_accounts(self) -> str:
         """List all configured email accounts."""
@@ -469,16 +475,26 @@ _Technische fout is gelogd op de server._"""
         """Send an email."""
         try:
             if hasattr(client, 'send_email'):
-                result = client.send_email(to=to, subject=subject, body=body, cc=cc)
+                # Pass SMTP config for IMAP clients
+                kwargs = {"to": to, "subject": subject, "body": body}
+                if cc:
+                    kwargs["cc"] = cc
+                # If this is an IMAP client with stored SMTP config, pass it
+                if hasattr(client, '_smtp_host') and client._smtp_host:
+                    kwargs["smtp_host"] = client._smtp_host
+                    kwargs["smtp_port"] = client._smtp_port
+                    kwargs["smtp_use_tls"] = client._smtp_use_tls
+                    kwargs["smtp_use_ssl"] = client._smtp_use_ssl
+                result = client.send_email(**kwargs)
                 if result:
-                    return f"✅ **Email verzonden**\n\n📧 Naar: {to}\n📝 Onderwerp: {subject}"
+                    return f"✅ **Email sent**\n\n📧 To: {to}\n📝 Subject: {subject}"
                 else:
-                    return "❌ Kon email niet verzenden"
+                    return "❌ Could not send email"
             else:
-                return "❌ Dit account ondersteunt geen emails verzenden"
+                return "❌ This account does not support sending emails"
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
-            return f"❌ Fout bij verzenden: {e}"
+            return f"❌ Send failed: {e}"
     
     def _read_message(self, client, message_id: str) -> str:
         """Read full message content."""

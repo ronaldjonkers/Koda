@@ -89,7 +89,8 @@ class AgentLoop:
             workspace=workspace,
             assistant_name=self.assistant_config.get("name", "Koda"),
             user_name=self.assistant_config.get("user_name", ""),
-            default_language=self.assistant_config.get("language", "en")
+            default_language=self.assistant_config.get("language", "en"),
+            config=self.calendar_config.get("config") if self.calendar_config else None,
         )
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()

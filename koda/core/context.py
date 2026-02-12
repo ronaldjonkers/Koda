@@ -24,7 +24,8 @@ class ContextBuilder:
         workspace: Path,
         assistant_name: str = "Koda",
         user_name: str = "",
-        default_language: str = "en"
+        default_language: str = "en",
+        config: Any = None,
     ):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
@@ -35,6 +36,7 @@ class ContextBuilder:
         self.assistant_name = assistant_name
         self.user_name = user_name
         self.default_language = default_language
+        self.config = config
     
     def build_system_prompt(
         self,
@@ -75,6 +77,11 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Before responding, check if any skill matches the user's request.
 
 {skills_prompt}""")
+        
+        # Configured accounts context
+        accounts_section = self._build_accounts_section()
+        if accounts_section:
+            parts.append(accounts_section)
         
         return "\n\n---\n\n".join(parts)
     
@@ -239,6 +246,83 @@ This applies to ALL your output:
                 return lang
         
         return self.default_language
+    
+    def _build_accounts_section(self) -> str:
+        """Inject configured email and calendar accounts so the AI never forgets them."""
+        if not self.config:
+            return ""
+        
+        try:
+            from loguru import logger
+            integrations = getattr(self.config, 'integrations', None)
+            if not integrations:
+                return ""
+            
+            lines = ["# Configured Accounts"]
+            lines.append("IMPORTANT: These are the ONLY accounts that exist. Do NOT invent or assume other accounts.")
+            lines.append("")
+            
+            # Gather all accounts
+            all_accounts = []
+            if hasattr(integrations, 'get_all_accounts'):
+                all_accounts = integrations.get_all_accounts()
+            else:
+                all_accounts = getattr(integrations, 'accounts', []) or []
+            
+            email_accounts = []
+            calendar_accounts = []
+            
+            for acc in all_accounts:
+                if isinstance(acc, dict):
+                    name = acc.get('name', '')
+                    acc_type = acc.get('type', '')
+                    email_addr = acc.get('email', '')
+                    caps = acc.get('capabilities', [])
+                    enabled = acc.get('enabled', True)
+                else:
+                    name = getattr(acc, 'name', '')
+                    acc_type = getattr(acc, 'type', '')
+                    email_addr = getattr(acc, 'email', '')
+                    caps = getattr(acc, 'capabilities', [])
+                    enabled = getattr(acc, 'enabled', True)
+                
+                if not enabled or not name:
+                    continue
+                
+                entry = f"- **{name}** (type: {acc_type})"
+                if email_addr:
+                    entry += f" \u2014 {email_addr}"
+                
+                if 'email' in caps or acc_type in ('exchange', 'google', 'imap'):
+                    email_accounts.append(entry)
+                if 'calendar' in caps or acc_type in ('exchange', 'google', 'caldav', 'google_caldav'):
+                    calendar_accounts.append(entry)
+            
+            if email_accounts:
+                lines.append("**Email accounts (use these exact names with the email tool):**")
+                lines.extend(email_accounts)
+                lines.append("")
+            else:
+                lines.append("**Email:** No email accounts configured.")
+                lines.append("")
+            
+            if calendar_accounts:
+                lines.append("**Calendar accounts (use these exact names with the calendar tool):**")
+                lines.extend(calendar_accounts)
+                lines.append("")
+            else:
+                lines.append("**Calendar:** No calendar accounts configured.")
+                lines.append("")
+            
+            if not email_accounts and not calendar_accounts:
+                return ""
+            
+            lines.append("When the user asks about email or calendar, ALWAYS use the account names listed above.")
+            lines.append("NEVER make up account names that are not in this list.")
+            
+            return "\n".join(lines)
+        except Exception as e:
+            return ""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
