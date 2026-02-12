@@ -8,10 +8,15 @@ Compatible with:
 """
 from __future__ import annotations
 
+import warnings
 from datetime import datetime, timedelta
 from typing import Any
 
+import urllib3
 from loguru import logger
+
+# Suppress noisy SSL warnings for Exchange servers with self-signed certs
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class ExchangeClient:
@@ -83,6 +88,17 @@ class ExchangeClient:
         
         # Disable SSL verification for compatibility with various Exchange servers
         BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+        
+        # Map custom timezone names that Exchange servers may use
+        try:
+            from exchangelib.winzone import MS_TIMEZONE_TO_IANA_MAP
+            if 'Customized Time Zone' not in MS_TIMEZONE_TO_IANA_MAP:
+                MS_TIMEZONE_TO_IANA_MAP['Customized Time Zone'] = 'Europe/Amsterdam'
+        except ImportError:
+            pass
+        
+        # Suppress exchangelib timezone conversion warnings
+        warnings.filterwarnings('ignore', message='Cannot convert value.*Customized Time Zone.*')
         
         # Set up credentials
         credentials = Credentials(self.username, self.password)
